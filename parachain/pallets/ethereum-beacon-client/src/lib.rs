@@ -175,8 +175,13 @@ pub mod pallet {
 	pub(super) type Blocked<T: Config> = StorageValue<_, bool, ValueQuery>;
 
 	#[pallet::storage]
-	pub(super) type SyncCommittees<T: Config> =
-		StorageMap<_, Identity, u64, SyncCommitteePrepared, OptionQuery>;
+	pub(super) type SyncCommittees<T: Config> = StorageMap<
+		Hasher = Identity,
+		Key = u64,
+		Value = SyncCommitteePrepared,
+		QueryKind = OptionQuery,
+		MaxValues = ConstU32<{ config::SYNC_COMMITTEE_SIZE as u32 }>,
+	>;
 
 	#[pallet::genesis_config]
 	pub struct GenesisConfig {

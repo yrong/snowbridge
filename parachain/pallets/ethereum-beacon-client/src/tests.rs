@@ -6,13 +6,13 @@ use primitives::{
 };
 
 pub fn prepare_milagro_pubkeys() -> Result<Vec<PublicKeyPrepared>, &'static str> {
-	let pubkeys = vec![
+	let pubkeys:[PublicKey; 4] = vec![
 		PublicKey(hex!("a73eb991aa22cdb794da6fcde55a427f0a4df5a4a70de23a988b5e5fc8c4d844f66d990273267a54dd21579b7ba6a086").into()),
 		PublicKey(hex!("b29043a7273d0a2dbc2b747dcf6a5eccbd7ccb44b2d72e985537b117929bc3fd3a99001481327788ad040b4077c47c0d").into()),
 		PublicKey(hex!("b928f3beb93519eecf0145da903b40a4c97dca00b21f12ac0df3be9116ef2ef27b2ae6bcd4c5bc2d54ef5a70627efcb7").into()),
 		PublicKey(hex!("9446407bcd8e5efe9f2ac0efbfa9e07d136e68b03c5ebc5bde43db3b94773de8605c30419eb2596513707e4e7448bb50").into()),
-	];
-	let milagro_pubkeys = prepare_g1_pubkeys(&pubkeys).unwrap();
+	].try_into().unwrap();
+	let milagro_pubkeys = prepare_g1_pubkeys(&pubkeys).unwrap().to_vec();
 	Ok(milagro_pubkeys)
 }
 
@@ -222,12 +222,12 @@ pub fn test_bls_fast_aggregate_verify_minimal() {
 #[test]
 pub fn test_bls_fast_aggregate_verify_invalid_point() {
 	new_tester::<mock_minimal::Test>().execute_with(|| {
-		let pubkeys = vec![
+		let pubkeys :[PublicKey;4] = vec![
 			PublicKey(hex!("973eb991aa22cdb794da6fcde55a427f0a4df5a4a70de23a988b5e5fc8c4d844f66d990273267a54dd21579b7ba6a086").into()),
 			PublicKey(hex!("b29043a7273d0a2dbc2b747dcf6a5eccbd7ccb44b2d72e985537b117929bc3fd3a99001481327788ad040b4077c47c0d").into()),
 			PublicKey(hex!("b928f3beb93519eecf0145da903b40a4c97dca00b21f12ac0df3be9116ef2ef27b2ae6bcd4c5bc2d54ef5a70627efcb7").into()),
 			PublicKey(hex!("9446407bcd8e5efe9f2ac0efbfa9e07d136e68b03c5ebc5bde43db3b94773de8605c30419eb2596513707e4e7448bb50").into()),
-		];
+		].try_into().unwrap();
 		assert_err!(prepare_g1_pubkeys(&pubkeys), BlsError::InvalidPublicKey);
 	});
 }

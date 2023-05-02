@@ -8,7 +8,7 @@ pub use milagro_bls::{
 use scale_info::TypeInfo;
 use sp_core::H256;
 use sp_runtime::RuntimeDebug;
-use sp_std::prelude::*;
+use sp_std::{convert::TryInto, prelude::*};
 
 #[derive(Copy, Clone, Encode, Decode, Eq, PartialEq, TypeInfo, RuntimeDebug, PalletError)]
 pub enum BlsError {
@@ -48,12 +48,19 @@ pub fn prepare_milagro_pubkey(pubkey: &PublicKey) -> Result<PublicKeyPrepared, B
 }
 
 // Prepare for G1 public keys
-pub fn prepare_g1_pubkeys(pubkeys: &[PublicKey]) -> Result<Vec<PublicKeyPrepared>, BlsError> {
-	pubkeys
+pub fn prepare_g1_pubkeys<const COMMITTEE_SIZE: usize>(
+	pubkeys: &[PublicKey; COMMITTEE_SIZE],
+) -> Result<[PublicKeyPrepared; COMMITTEE_SIZE], BlsError> {
+	let pubkeys_prepared = pubkeys
 		.iter()
 		// Deserialize one public key from compressed bytes
 		.map(prepare_milagro_pubkey)
-		.collect::<Result<Vec<PublicKeyPrepared>, BlsError>>()
+		.collect::<Result<Vec<PublicKeyPrepared>, BlsError>>()?;
+	let result: [PublicKeyPrepared; COMMITTEE_SIZE] =
+		pubkeys_prepared.try_into().unwrap_or_else(|v: Vec<PublicKeyPrepared>| {
+			panic!("Expected G1 pubkey Vec of length {} but it was {}", COMMITTEE_SIZE, v.len())
+		});
+	Ok(result)
 }
 
 // Prepare for G1 AggregatePublicKey

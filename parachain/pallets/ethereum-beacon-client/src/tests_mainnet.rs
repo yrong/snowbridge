@@ -187,7 +187,7 @@ pub fn test_bls_fast_aggregate_verify() {
 	let test_data =
 		get_bls_signature_verify_test_data::<SYNC_COMMITTEE_SIZE, SYNC_COMMITTEE_BITS_SIZE>();
 
-	let milagro_pubkeys = prepare_g1_pubkeys(&test_data.pubkeys.to_vec()).unwrap();
+	let milagro_pubkeys = prepare_g1_pubkeys::<SYNC_COMMITTEE_SIZE>(&test_data.pubkeys).unwrap();
 
 	let participant_bits = decompress_sync_committee_bits::<
 		SYNC_COMMITTEE_SIZE,
