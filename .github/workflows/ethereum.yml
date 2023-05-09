@@ -6,7 +6,7 @@ on:
       - "core/**"
       - "!core/**/README.md"
     branches:
-      - *
+      - "*"
   pull_request:
     paths:
       - "core/**"
