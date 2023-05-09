@@ -6,7 +6,7 @@ on:
       - "core/**"
       - "!core/**/README.md"
     branches:
-      - main
+      - *
   pull_request:
     paths:
       - "core/**"
@@ -15,7 +15,7 @@ on:
 
 jobs:
   build:
-    runs-on: [snowbridge-runner,ubuntu-latest]
+    runs-on: [ubuntu-latest]
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v1
