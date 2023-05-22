@@ -18,7 +18,8 @@ pub use types::{
 	SigningData, SyncAggregate, SyncCommittee, SyncCommitteePrepared,
 };
 pub use updates::{
-	CheckpointUpdate, ExecutionHeaderUpdate, FinalizedHeaderUpdate, SyncCommitteeUpdate,
+	CheckpointUpdate, ExecutionHeaderUpdate, FinalizedHeaderUpdate, LightClientUpdate,
+	SyncCommitteeUpdate,
 };
 
 pub use bits::decompress_sync_committee_bits;

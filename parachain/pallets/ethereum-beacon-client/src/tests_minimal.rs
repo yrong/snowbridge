@@ -73,40 +73,10 @@ fn it_updates_a_committee_period_sync_update_with_invalid_signature_slot() {
 				mock_minimal::RuntimeOrigin::signed(1),
 				update.clone(),
 			),
-			Error::<mock_minimal::Test>::InvalidSignatureSlot
+			Error::<mock_minimal::Test>::InvalidUpdateInput
 		);
 	});
 }
-
-/*
-#[test]
-fn it_updates_a_invalid_committee_period_sync_update_with_gap() {
-	let initial_sync = get_initial_sync::<mock_minimal::Test>();
-
-	let update = get_committee_sync_period_update::<mock_minimal::Test>();
-
-	new_tester::<mock_minimal::Test>().execute_with(|| {
-		assert_ok!(mock_minimal::EthereumBeaconClient::initial_sync(initial_sync.clone()));
-
-		let current_period = compute_period(
-			update.attested_header.slot,
-		);
-
-		SyncCommittees::<mock_minimal::Test>::insert(
-			current_period,
-			initial_sync.current_sync_committee,
-		);
-
-		assert_err!(
-			mock_minimal::EthereumBeaconClient::sync_committee_period_update(
-				mock_minimal::RuntimeOrigin::signed(1),
-				update.clone(),
-			),
-			Error::<mock_minimal::Test>::InvalidSyncCommitteeUpdateWithGap
-		);
-	});
-}
-*/
 
 #[test]
 fn it_updates_a_invalid_committee_period_sync_update_with_duplicate_entry() {
@@ -115,14 +85,16 @@ fn it_updates_a_invalid_committee_period_sync_update_with_duplicate_entry() {
 	let update =
 		get_committee_sync_period_update::<SYNC_COMMITTEE_SIZE, SYNC_COMMITTEE_BITS_SIZE>();
 
+	let current_period = compute_period(update.attested_header.slot);
+
 	new_tester::<mock_minimal::Test>().execute_with(|| {
 		assert_ok!(mock_minimal::EthereumBeaconClient::process_checkpoint_update(&initial_sync));
 
-		let current_period = compute_period(update.attested_header.slot);
-
-		assert_ok!(mock_minimal::EthereumBeaconClient::store_sync_committee(
-			current_period,
-			&initial_sync.current_sync_committee,
+		let finalized_root = update.finalized_header.hash_tree_root().unwrap();
+		assert_ok!(mock_minimal::EthereumBeaconClient::store_finalized_header(
+			finalized_root,
+			update.finalized_header,
+			None,
 		));
 
 		// initialize with period of the next update
@@ -208,33 +180,6 @@ fn it_processes_a_invalid_finalized_header_update() {
 		);
 	});
 }
-
-/*
-#[test]
-fn it_processes_a_invalid_finalized_header_update_with_period_gap() {
-	let initial_sync = get_initial_sync::<mock_minimal::Test>();
-	let update = get_finalized_header_update::<mock_minimal::Test>();
-
-	new_tester::<mock_minimal::Test>().execute_with(|| {
-		LatestFinalizedHeaderState::<mock_minimal::Test>::set(FinalizedHeaderState {
-			beacon_block_root: Default::default(),
-			import_time: 0,
-			// initialize last_finalized_slot as period 0
-			beacon_slot: 1,
-		});
-		SyncCommittees::<mock_minimal::Test>::insert(0, initial_sync.current_sync_committee);
-		ValidatorsRoot::<mock_minimal::Test>::set(get_validators_root::<mock_minimal::Test>());
-
-		// update with period 2 to make period gap check fail
-		assert_err!(
-			mock_minimal::EthereumBeaconClient::import_finalized_header(
-				mock_minimal::RuntimeOrigin::signed(1),
-				update.clone()
-			),
-			Error::<mock_minimal::Test>::InvalidFinalizedPeriodUpdate
-		);
-	});
-}*/
 
 #[test]
 fn it_processes_a_header_update() {

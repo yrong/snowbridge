@@ -4,7 +4,7 @@ use crate::{
 	config::{SYNC_COMMITTEE_BITS_SIZE, SYNC_COMMITTEE_SIZE},
 	mock::*,
 	Error, ExecutionHeaders, FinalizedBeaconHeaders, FinalizedBeaconHeadersBlockRoot,
-	FinalizedHeaderState, LatestFinalizedHeader, LatestSyncCommitteePeriod, ValidatorsRoot,
+	FinalizedHeaderState, LatestFinalizedHeader, ValidatorsRoot,
 };
 use frame_support::{assert_err, assert_ok};
 use hex_literal::hex;
@@ -28,28 +28,20 @@ fn it_syncs_from_an_initial_checkpoint() {
 
 #[test]
 fn it_updates_a_committee_period_sync_update() {
+	let init_sync = get_initial_sync::<{ SYNC_COMMITTEE_SIZE }>();
 	let update =
 		get_committee_sync_period_update::<SYNC_COMMITTEE_SIZE, SYNC_COMMITTEE_BITS_SIZE>();
-	let current_sync_committee =
-		get_initial_sync::<{ SYNC_COMMITTEE_SIZE }>().current_sync_committee;
-	let current_period = compute_period(update.attested_header.slot);
 
 	new_tester::<mock_mainnet::Test>().execute_with(|| {
-		LatestSyncCommitteePeriod::<mock_mainnet::Test>::set(current_period);
-		ValidatorsRoot::<mock_mainnet::Test>::set(get_validators_root::<{ SYNC_COMMITTEE_SIZE }>());
-		assert_ok!(mock_mainnet::EthereumBeaconClient::store_sync_committee(
-			current_period,
-			&current_sync_committee,
-		));
-
-		let block_root: H256 = update.finalized_header.hash_tree_root().unwrap();
-
+		assert_ok!(mock_mainnet::EthereumBeaconClient::process_checkpoint_update(&init_sync));
+		let latest_period = mock_mainnet::EthereumBeaconClient::latest_sync_committee_period();
 		assert_ok!(mock_mainnet::EthereumBeaconClient::sync_committee_period_update(
 			mock_mainnet::RuntimeOrigin::signed(1),
-			update,
+			update
 		));
-
-		assert!(<FinalizedBeaconHeaders<mock_mainnet::Test>>::contains_key(block_root));
+		let last_updated_period =
+			mock_mainnet::EthereumBeaconClient::latest_sync_committee_period();
+		assert_eq!(last_updated_period, latest_period + 1);
 	});
 }
 

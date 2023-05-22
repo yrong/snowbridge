@@ -13,6 +13,7 @@ pub type FinalizedHeaderUpdate = primitives::FinalizedHeaderUpdate<SC_SIZE, SC_B
 pub type SyncCommittee = primitives::SyncCommittee<SC_SIZE>;
 pub type SyncCommitteePrepared = primitives::SyncCommitteePrepared<SC_SIZE>;
 pub type SyncAggregate = primitives::SyncAggregate<SC_SIZE, SC_BITS_SIZE>;
+pub type LightClientUpdate = primitives::LightClientUpdate<SC_SIZE, SC_BITS_SIZE>;
 
 /// ExecutionHeader ring buffer implementation
 pub(crate) type ExecutionHeaderBuffer<T> = RingBufferMapImpl<
