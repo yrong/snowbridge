@@ -20,6 +20,7 @@ var ErrFinalizedHeaderUnchanged = errors.New("finalized header unchanged")
 var ErrFinalizedHeaderNotImported = errors.New("finalized header not imported")
 var ErrSyncCommitteeNotImported = errors.New("sync committee not imported")
 var ErrSyncCommitteeLatency = errors.New("sync committee latency found")
+var ErrExecutionHeaderNotImported = errors.New("execution header not imported")
 
 type Header struct {
 	cache  *cache.BeaconCache
@@ -28,11 +29,12 @@ type Header struct {
 }
 
 func New(writer *parachain.ParachainWriter, beaconEndpoint string, setting config.SpecSettings, activeSpec config.ActiveSpec) Header {
-	return Header{
+	header := Header{
 		cache:  cache.New(setting.SlotsInEpoch, setting.EpochsPerSyncCommitteePeriod),
 		writer: writer,
 		syncer: syncer.New(beaconEndpoint, setting, activeSpec),
 	}
+	return header
 }
 
 func (h *Header) Sync(ctx context.Context, eg *errgroup.Group) error {
@@ -78,6 +80,8 @@ func (h *Header) Sync(ctx context.Context, eg *errgroup.Group) error {
 				log.WithFields(logFields).WithError(err).Warn("SyncCommittee not imported")
 			case errors.Is(err, ErrSyncCommitteeLatency):
 				log.WithFields(logFields).WithError(err).Warn("SyncCommittee latency found")
+			case errors.Is(err, ErrExecutionHeaderNotImported):
+				log.WithFields(logFields).WithError(err).Warn("ExecutionHeader not imported")
 			case errors.Is(err, syncer.ErrBeaconStateAvailableYet):
 				log.WithFields(logFields).WithError(err).Warn("beacon state not available for finalized state yet")
 			case err != nil:
@@ -184,7 +188,7 @@ func (h *Header) SyncFinalizedHeader(ctx context.Context) error {
 func (h *Header) SyncHeaders(ctx context.Context) error {
 	err := h.SyncExecutionHeaders(ctx)
 	if err != nil {
-		return fmt.Errorf("sync execution headers: %w", err)
+		return err
 	}
 
 	hasChanged, err := h.syncer.HasFinalizedHeaderChanged(h.cache.Finalized.LastSyncedHash)
@@ -234,7 +238,7 @@ func (h *Header) SyncExecutionHeaders(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("get next header update by slot with ancestry proof: %w", err)
 	}
-	currentSlot++
+	currentSlot = uint64(headerUpdate.Header.Slot)
 
 	for currentSlot <= toSlot {
 		log.WithFields(log.Fields{
@@ -269,6 +273,24 @@ func (h *Header) SyncExecutionHeaders(ctx context.Context) error {
 		}
 		headerUpdate = nextHeaderUpdate
 		currentSlot = uint64(headerUpdate.Header.Slot)
+	}
+	// waiting for all batch calls to be executed on chain
+	batchCallFinished := false
+	cnt := 0
+	for cnt <= 10 {
+		executionHeaderState, err := h.writer.GetLastExecutionHeaderState()
+		if err != nil {
+			return fmt.Errorf("fetch last execution hash: %w", err)
+		}
+		if executionHeaderState.BeaconSlot == toSlot {
+			batchCallFinished = true
+			break
+		}
+		time.Sleep(6 * time.Second)
+		cnt++
+	}
+	if !batchCallFinished {
+		return ErrExecutionHeaderNotImported
 	}
 	h.cache.SetLastSyncedExecutionSlot(toSlot)
 	return nil
