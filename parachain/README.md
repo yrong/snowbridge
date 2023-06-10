@@ -153,7 +153,7 @@ To generate the data we can connect to the Lodestar Goerli public node. The scri
 
 ```bash
 cd core/packages/test
-./scripts/start-goerli.sh
+./scripts/deploy-goerli.sh
 ```
 
 From the `snowbridge` directory, run:
