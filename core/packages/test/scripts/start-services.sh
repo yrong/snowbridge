@@ -26,7 +26,7 @@ if [ "$eth_network" == "localhost" ]; then
   deploy_ethereum
 else
   source scripts/deploy-goerli.sh
-  # deploy beacon node locally for fast api response time, without it retrieve beacon state could be very slow
+  # deploy beacon node locally for fast response time or retrieving beacon state could be very slow
   deploy_goerli
 fi
 

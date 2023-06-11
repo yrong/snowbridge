@@ -3,12 +3,13 @@ pragma solidity ^0.8.19;
 
 import {MerkleProof} from "openzeppelin/utils/cryptography/MerkleProof.sol";
 import {AccessControl} from "openzeppelin/access/AccessControl.sol";
+import {Initializable} from "openzeppelin/proxy/utils/Initializable.sol";
 import {IParachainClient} from "./ParachainClient.sol";
 import {IRecipient} from "./IRecipient.sol";
 import {IVault} from "./IVault.sol";
 import {ParaID} from "./Types.sol";
 
-contract InboundQueue is AccessControl {
+contract InboundQueue is AccessControl, Initializable {
     // Nonce for each origin
     mapping(ParaID origin => uint64) public nonce;
 
@@ -51,15 +52,17 @@ contract InboundQueue is AccessControl {
     event RewardUpdated(uint256 reward);
     event GasToForwardUpdated(uint256 gasToForward);
 
-
     error InvalidProof();
     error InvalidNonce();
     error InvalidHandler();
     error NotEnoughGas();
 
-    constructor(IParachainClient _parachainClient, IVault _vault, uint256 _reward) {
+    constructor() {
         _grantRole(ADMIN_ROLE, msg.sender);
         _setRoleAdmin(ADMIN_ROLE, ADMIN_ROLE);
+    }
+
+    function initialize(IParachainClient _parachainClient, IVault _vault, uint256 _reward) public initializer onlyRole(ADMIN_ROLE) {
         parachainClient = _parachainClient;
         vault = _vault;
         reward = _reward;

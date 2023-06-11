@@ -1,16 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
 pragma solidity ^0.8.19;
 
-import "openzeppelin/utils/cryptography/MerkleProof.sol";
-import "./BeefyClient.sol";
-import "./IParachainClient.sol";
-import "./ScaleCodec.sol";
-import "./SubstrateTypes.sol";
+import {MerkleProof} from "openzeppelin/utils/cryptography/MerkleProof.sol";
+import {Initializable} from "openzeppelin/proxy/utils/Initializable.sol";
+import {BeefyClient} from "./BeefyClient.sol";
+import {IParachainClient} from "./IParachainClient.sol";
+import {ScaleCodec} from "./ScaleCodec.sol";
+import {SubstrateTypes} from "./SubstrateTypes.sol";
 
-contract ParachainClient is IParachainClient {
-    BeefyClient public immutable beefyClient;
-    uint32 public immutable parachainID;
-    bytes4 public immutable encodedParachainID;
+contract ParachainClient is IParachainClient, Initializable {
+    BeefyClient public beefyClient;
+    uint32 public parachainID;
+    bytes4 public encodedParachainID;
 
     struct HeadProof {
         uint256 pos;
@@ -57,7 +58,7 @@ contract ParachainClient is IParachainClient {
 
     error InvalidParachainHeader();
 
-    constructor(BeefyClient _client, uint32 _parachainID) {
+    function initialize(BeefyClient _client, uint32 _parachainID) public initializer {
         beefyClient = _client;
         parachainID = _parachainID;
         encodedParachainID = ScaleCodec.encodeU32(_parachainID);

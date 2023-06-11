@@ -2,10 +2,11 @@
 pragma solidity ^0.8.19;
 
 import {AccessControl} from "openzeppelin/access/AccessControl.sol";
+import {Initializable} from "openzeppelin/proxy/utils/Initializable.sol";
 import {IVault} from "./IVault.sol";
 import {ParaID} from "./Types.sol";
 
-contract SovereignTreasury is AccessControl {
+contract SovereignTreasury is AccessControl,Initializable {
     bytes32 public constant ADMIN_ROLE = keccak256("ADMIN_ROLE");
     bytes32 public constant SENDER_ROLE = keccak256("SENDER_ROLE");
 
@@ -26,10 +27,13 @@ contract SovereignTreasury is AccessControl {
         uint256 amount;
     }
 
-    constructor(IVault _vault) {
+    constructor() {
         _grantRole(ADMIN_ROLE, msg.sender);
         _setRoleAdmin(ADMIN_ROLE, ADMIN_ROLE);
         _setRoleAdmin(SENDER_ROLE, ADMIN_ROLE);
+    }
+
+    function initialize(IVault _vault) public initializer onlyRole(ADMIN_ROLE) {
         vault = _vault;
     }
 

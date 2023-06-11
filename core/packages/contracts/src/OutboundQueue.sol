@@ -2,11 +2,12 @@
 pragma solidity ^0.8.19;
 
 import {AccessControl} from "openzeppelin/access/AccessControl.sol";
+import {Initializable} from "openzeppelin/proxy/utils/Initializable.sol";
 import {IOutboundQueue} from "./IOutboundQueue.sol";
 import {IVault} from "./IVault.sol";
 import {ParaID} from "./Types.sol";
 
-contract OutboundQueue is IOutboundQueue, AccessControl {
+contract OutboundQueue is IOutboundQueue, AccessControl, Initializable {
     bytes32 public constant ADMIN_ROLE = keccak256("ADMIN_ROLE");
     bytes32 public constant SUBMIT_ROLE = keccak256("SUBMIT_ROLE");
 
@@ -19,10 +20,13 @@ contract OutboundQueue is IOutboundQueue, AccessControl {
 
     error FeePaymentToLow();
 
-    constructor(IVault _vault, uint256 _fee) {
+    constructor() {
         _grantRole(ADMIN_ROLE, msg.sender);
         _setRoleAdmin(ADMIN_ROLE, ADMIN_ROLE);
         _setRoleAdmin(SUBMIT_ROLE, ADMIN_ROLE);
+    }
+
+    function initialize(IVault _vault, uint256 _fee) public initializer onlyRole(ADMIN_ROLE) {
         vault = _vault;
         fee = _fee;
     }

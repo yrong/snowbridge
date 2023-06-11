@@ -1,7 +1,7 @@
 {
   "contracts": {
     "Bitfield": {
-      "address": "0x721ceb94B728fe6Bf7FE2f605003855443616Aad",
+      "address": "0xeFd7f55793A2fb56d2eDb9740B429B1D6B57Eb79",
       "abi": [
         {
           "inputs": [
@@ -49,7 +49,7 @@
       ]
     },
     "Vault": {
-      "address": "0x81FF8863949AA2DEB8891387Fb87e9ccac179F1F",
+      "address": "0xEAb59D75C921b301Eac8F7c8abcfAB4A0761bd10",
       "abi": [
         {
           "inputs": [],
@@ -407,18 +407,25 @@
       ]
     },
     "SovereignTreasury": {
-      "address": "0x13b9807D7DEaaF3b1F83FF371367D2b83b06FAeC",
+      "address": "0xAa962e2024105E58484921c76b6A99Dc97ea11aE",
       "abi": [
         {
-          "inputs": [
-            {
-              "internalType": "contract IVault",
-              "name": "_vault",
-              "type": "address"
-            }
-          ],
+          "inputs": [],
           "stateMutability": "nonpayable",
           "type": "constructor"
+        },
+        {
+          "anonymous": false,
+          "inputs": [
+            {
+              "indexed": false,
+              "internalType": "uint8",
+              "name": "version",
+              "type": "uint8"
+            }
+          ],
+          "name": "Initialized",
+          "type": "event"
         },
         {
           "anonymous": false,
@@ -616,6 +623,19 @@
         {
           "inputs": [
             {
+              "internalType": "contract IVault",
+              "name": "_vault",
+              "type": "address"
+            }
+          ],
+          "name": "initialize",
+          "outputs": [],
+          "stateMutability": "nonpayable",
+          "type": "function"
+        },
+        {
+          "inputs": [
+            {
               "internalType": "bytes32",
               "name": "role",
               "type": "bytes32"
@@ -684,21 +704,10 @@
       ]
     },
     "BeefyClient": {
-      "address": "0x4f8e74a9C84acAC4364E49B25bCC5B34047e0866",
+      "address": "0x74fA254C2290c8c68b076854cDf48B96be476659",
       "abi": [
         {
-          "inputs": [
-            {
-              "internalType": "uint256",
-              "name": "_randaoCommitDelay",
-              "type": "uint256"
-            },
-            {
-              "internalType": "uint256",
-              "name": "_randaoCommitExpiration",
-              "type": "uint256"
-            }
-          ],
+          "inputs": [],
           "stateMutability": "nonpayable",
           "type": "constructor"
         },
@@ -772,6 +781,19 @@
           "inputs": [
             {
               "indexed": false,
+              "internalType": "uint8",
+              "name": "version",
+              "type": "uint8"
+            }
+          ],
+          "name": "Initialized",
+          "type": "event"
+        },
+        {
+          "anonymous": false,
+          "inputs": [
+            {
+              "indexed": false,
               "internalType": "bytes32",
               "name": "mmrRoot",
               "type": "bytes32"
@@ -791,19 +813,101 @@
           "inputs": [
             {
               "indexed": true,
+              "internalType": "bytes32",
+              "name": "role",
+              "type": "bytes32"
+            },
+            {
+              "indexed": true,
+              "internalType": "bytes32",
+              "name": "previousAdminRole",
+              "type": "bytes32"
+            },
+            {
+              "indexed": true,
+              "internalType": "bytes32",
+              "name": "newAdminRole",
+              "type": "bytes32"
+            }
+          ],
+          "name": "RoleAdminChanged",
+          "type": "event"
+        },
+        {
+          "anonymous": false,
+          "inputs": [
+            {
+              "indexed": true,
+              "internalType": "bytes32",
+              "name": "role",
+              "type": "bytes32"
+            },
+            {
+              "indexed": true,
               "internalType": "address",
-              "name": "previousOwner",
+              "name": "account",
               "type": "address"
             },
             {
               "indexed": true,
               "internalType": "address",
-              "name": "newOwner",
+              "name": "sender",
               "type": "address"
             }
           ],
-          "name": "OwnershipTransferred",
+          "name": "RoleGranted",
           "type": "event"
+        },
+        {
+          "anonymous": false,
+          "inputs": [
+            {
+              "indexed": true,
+              "internalType": "bytes32",
+              "name": "role",
+              "type": "bytes32"
+            },
+            {
+              "indexed": true,
+              "internalType": "address",
+              "name": "account",
+              "type": "address"
+            },
+            {
+              "indexed": true,
+              "internalType": "address",
+              "name": "sender",
+              "type": "address"
+            }
+          ],
+          "name": "RoleRevoked",
+          "type": "event"
+        },
+        {
+          "inputs": [],
+          "name": "ADMIN_ROLE",
+          "outputs": [
+            {
+              "internalType": "bytes32",
+              "name": "",
+              "type": "bytes32"
+            }
+          ],
+          "stateMutability": "view",
+          "type": "function"
+        },
+        {
+          "inputs": [],
+          "name": "DEFAULT_ADMIN_ROLE",
+          "outputs": [
+            {
+              "internalType": "bytes32",
+              "name": "",
+              "type": "bytes32"
+            }
+          ],
+          "stateMutability": "view",
+          "type": "function"
         },
         {
           "inputs": [
@@ -941,6 +1045,85 @@
               "type": "tuple"
             }
           ],
+          "name": "forceCheckpoint",
+          "outputs": [],
+          "stateMutability": "nonpayable",
+          "type": "function"
+        },
+        {
+          "inputs": [
+            {
+              "internalType": "bytes32",
+              "name": "role",
+              "type": "bytes32"
+            }
+          ],
+          "name": "getRoleAdmin",
+          "outputs": [
+            {
+              "internalType": "bytes32",
+              "name": "",
+              "type": "bytes32"
+            }
+          ],
+          "stateMutability": "view",
+          "type": "function"
+        },
+        {
+          "inputs": [
+            {
+              "internalType": "bytes32",
+              "name": "role",
+              "type": "bytes32"
+            },
+            {
+              "internalType": "address",
+              "name": "account",
+              "type": "address"
+            }
+          ],
+          "name": "grantRole",
+          "outputs": [],
+          "stateMutability": "nonpayable",
+          "type": "function"
+        },
+        {
+          "inputs": [
+            {
+              "internalType": "bytes32",
+              "name": "role",
+              "type": "bytes32"
+            },
+            {
+              "internalType": "address",
+              "name": "account",
+              "type": "address"
+            }
+          ],
+          "name": "hasRole",
+          "outputs": [
+            {
+              "internalType": "bool",
+              "name": "",
+              "type": "bool"
+            }
+          ],
+          "stateMutability": "view",
+          "type": "function"
+        },
+        {
+          "inputs": [
+            {
+              "internalType": "uint256",
+              "name": "_randaoCommitDelay",
+              "type": "uint256"
+            },
+            {
+              "internalType": "uint256",
+              "name": "_randaoCommitExpiration",
+              "type": "uint256"
+            }
+          ],
           "name": "initialize",
           "outputs": [],
           "stateMutability": "nonpayable",
@@ -997,19 +1180,6 @@
         },
         {
           "inputs": [],
-          "name": "owner",
-          "outputs": [
-            {
-              "internalType": "address",
-              "name": "",
-              "type": "address"
-            }
-          ],
-          "stateMutability": "view",
-          "type": "function"
-        },
-        {
-          "inputs": [],
           "name": "randaoCommitDelay",
           "outputs": [
             {
@@ -1035,8 +1205,37 @@
           "type": "function"
         },
         {
-          "inputs": [],
-          "name": "renounceOwnership",
+          "inputs": [
+            {
+              "internalType": "bytes32",
+              "name": "role",
+              "type": "bytes32"
+            },
+            {
+              "internalType": "address",
+              "name": "account",
+              "type": "address"
+            }
+          ],
+          "name": "renounceRole",
+          "outputs": [],
+          "stateMutability": "nonpayable",
+          "type": "function"
+        },
+        {
+          "inputs": [
+            {
+              "internalType": "bytes32",
+              "name": "role",
+              "type": "bytes32"
+            },
+            {
+              "internalType": "address",
+              "name": "account",
+              "type": "address"
+            }
+          ],
+          "name": "revokeRole",
           "outputs": [],
           "stateMutability": "nonpayable",
           "type": "function"
@@ -1310,6 +1509,25 @@
         {
           "inputs": [
             {
+              "internalType": "bytes4",
+              "name": "interfaceId",
+              "type": "bytes4"
+            }
+          ],
+          "name": "supportsInterface",
+          "outputs": [
+            {
+              "internalType": "bool",
+              "name": "",
+              "type": "bool"
+            }
+          ],
+          "stateMutability": "view",
+          "type": "function"
+        },
+        {
+          "inputs": [
+            {
               "internalType": "bytes32",
               "name": "",
               "type": "bytes32"
@@ -1349,19 +1567,6 @@
         {
           "inputs": [
             {
-              "internalType": "address",
-              "name": "newOwner",
-              "type": "address"
-            }
-          ],
-          "name": "transferOwnership",
-          "outputs": [],
-          "stateMutability": "nonpayable",
-          "type": "function"
-        },
-        {
-          "inputs": [
-            {
               "internalType": "bytes32",
               "name": "leafHash",
               "type": "bytes32"
@@ -1391,28 +1596,25 @@
       ]
     },
     "ParachainClient": {
-      "address": "0x2374f31ecFA8f3b14fd8B58973c0c1E60F9430DC",
+      "address": "0xfa582A309Be6F8FeC5b5227B690Cb2882860b8D2",
       "abi": [
-        {
-          "inputs": [
-            {
-              "internalType": "contract BeefyClient",
-              "name": "_client",
-              "type": "address"
-            },
-            {
-              "internalType": "uint32",
-              "name": "_parachainID",
-              "type": "uint32"
-            }
-          ],
-          "stateMutability": "nonpayable",
-          "type": "constructor"
-        },
         {
           "inputs": [],
           "name": "InvalidParachainHeader",
           "type": "error"
+        },
+        {
+          "anonymous": false,
+          "inputs": [
+            {
+              "indexed": false,
+              "internalType": "uint8",
+              "name": "version",
+              "type": "uint8"
+            }
+          ],
+          "name": "Initialized",
+          "type": "event"
         },
         {
           "inputs": [],
@@ -1506,6 +1708,24 @@
           "type": "function"
         },
         {
+          "inputs": [
+            {
+              "internalType": "contract BeefyClient",
+              "name": "_client",
+              "type": "address"
+            },
+            {
+              "internalType": "uint32",
+              "name": "_parachainID",
+              "type": "uint32"
+            }
+          ],
+          "name": "initialize",
+          "outputs": [],
+          "stateMutability": "nonpayable",
+          "type": "function"
+        },
+        {
           "inputs": [],
           "name": "parachainID",
           "outputs": [
@@ -1545,26 +1765,10 @@
       ]
     },
     "InboundQueue": {
-      "address": "0x51C65a591055f8ADF80a3369Cb58754677462d78",
+      "address": "0x8FF26337D20c03cCe7Bd5D653164DBE24306E5e2",
       "abi": [
         {
-          "inputs": [
-            {
-              "internalType": "contract IParachainClient",
-              "name": "_parachainClient",
-              "type": "address"
-            },
-            {
-              "internalType": "contract IVault",
-              "name": "_vault",
-              "type": "address"
-            },
-            {
-              "internalType": "uint256",
-              "name": "_reward",
-              "type": "uint256"
-            }
-          ],
+          "inputs": [],
           "stateMutability": "nonpayable",
           "type": "constructor"
         },
@@ -1618,6 +1822,19 @@
             }
           ],
           "name": "HandlerUpdated",
+          "type": "event"
+        },
+        {
+          "anonymous": false,
+          "inputs": [
+            {
+              "indexed": false,
+              "internalType": "uint8",
+              "name": "version",
+              "type": "uint8"
+            }
+          ],
+          "name": "Initialized",
           "type": "event"
         },
         {
@@ -1894,6 +2111,29 @@
         {
           "inputs": [
             {
+              "internalType": "contract IParachainClient",
+              "name": "_parachainClient",
+              "type": "address"
+            },
+            {
+              "internalType": "contract IVault",
+              "name": "_vault",
+              "type": "address"
+            },
+            {
+              "internalType": "uint256",
+              "name": "_reward",
+              "type": "uint256"
+            }
+          ],
+          "name": "initialize",
+          "outputs": [],
+          "stateMutability": "nonpayable",
+          "type": "function"
+        },
+        {
+          "inputs": [
+            {
               "internalType": "ParaID",
               "name": "origin",
               "type": "uint32"
@@ -2122,21 +2362,10 @@
       ]
     },
     "OutboundQueue": {
-      "address": "0x701a3CDCb5e412E04EB8f13788FF922AC68240Fa",
+      "address": "0x6262A5038F804d489E2AaFD5e58047D156aEcE47",
       "abi": [
         {
-          "inputs": [
-            {
-              "internalType": "contract IVault",
-              "name": "_vault",
-              "type": "address"
-            },
-            {
-              "internalType": "uint256",
-              "name": "_fee",
-              "type": "uint256"
-            }
-          ],
+          "inputs": [],
           "stateMutability": "nonpayable",
           "type": "constructor"
         },
@@ -2156,6 +2385,19 @@
             }
           ],
           "name": "FeeUpdated",
+          "type": "event"
+        },
+        {
+          "anonymous": false,
+          "inputs": [
+            {
+              "indexed": false,
+              "internalType": "uint8",
+              "name": "version",
+              "type": "uint8"
+            }
+          ],
+          "name": "Initialized",
           "type": "event"
         },
         {
@@ -2374,6 +2616,24 @@
         {
           "inputs": [
             {
+              "internalType": "contract IVault",
+              "name": "_vault",
+              "type": "address"
+            },
+            {
+              "internalType": "uint256",
+              "name": "_fee",
+              "type": "uint256"
+            }
+          ],
+          "name": "initialize",
+          "outputs": [],
+          "stateMutability": "nonpayable",
+          "type": "function"
+        },
+        {
+          "inputs": [
+            {
               "internalType": "ParaID",
               "name": "dest",
               "type": "uint32"
@@ -2492,7 +2752,7 @@
       ]
     },
     "TokenVault": {
-      "address": "0xe5b8E516246891281d3bB04fB8ba84E4b7ba2E7B",
+      "address": "0x41FA8198B970189201bBb67fB77d456349AbaE5a",
       "abi": [
         {
           "inputs": [],
@@ -2865,31 +3125,10 @@
       ]
     },
     "NativeTokens": {
-      "address": "0x8a05C4Dbbffe148BE8914b56508Afe1cb3cea568",
+      "address": "0x7289EAcAF58889BF4a28Fcbb7c25321132Ab28AB",
       "abi": [
         {
-          "inputs": [
-            {
-              "internalType": "contract TokenVault",
-              "name": "_vault",
-              "type": "address"
-            },
-            {
-              "internalType": "contract IOutboundQueue",
-              "name": "_outboundQueue",
-              "type": "address"
-            },
-            {
-              "internalType": "ParaID",
-              "name": "_assetHubParaID",
-              "type": "uint32"
-            },
-            {
-              "internalType": "uint256",
-              "name": "_createTokenFee",
-              "type": "uint256"
-            }
-          ],
+          "inputs": [],
           "stateMutability": "nonpayable",
           "type": "constructor"
         },
@@ -2919,6 +3158,19 @@
             }
           ],
           "name": "Created",
+          "type": "event"
+        },
+        {
+          "anonymous": false,
+          "inputs": [
+            {
+              "indexed": false,
+              "internalType": "uint8",
+              "name": "version",
+              "type": "uint8"
+            }
+          ],
+          "name": "Initialized",
           "type": "event"
         },
         {
@@ -3219,6 +3471,34 @@
         {
           "inputs": [
             {
+              "internalType": "contract TokenVault",
+              "name": "_vault",
+              "type": "address"
+            },
+            {
+              "internalType": "contract IOutboundQueue",
+              "name": "_outboundQueue",
+              "type": "address"
+            },
+            {
+              "internalType": "ParaID",
+              "name": "_assetHubParaID",
+              "type": "uint32"
+            },
+            {
+              "internalType": "uint256",
+              "name": "_createTokenFee",
+              "type": "uint256"
+            }
+          ],
+          "name": "initialize",
+          "outputs": [],
+          "stateMutability": "nonpayable",
+          "type": "function"
+        },
+        {
+          "inputs": [
+            {
               "internalType": "address",
               "name": "token",
               "type": "address"
@@ -3341,7 +3621,7 @@
       ]
     },
     "WETH9": {
-      "address": "0x8918540d971Ba04a8f812A499AcA5d06A4cca9F7",
+      "address": "0x66065fBe0eb6E7f7e6e1cbd9F8885545b4b6347C",
       "abi": [
         {
           "anonymous": false,
@@ -3630,16 +3910,10 @@
       ]
     },
     "UpgradeProxy": {
-      "address": "0xfa7015EAD40E403B5068Fc38f029AAAa3E2115F5",
+      "address": "0xd71bdC893ae967A44B27AA0aa8E229DCE805b866",
       "abi": [
         {
-          "inputs": [
-            {
-              "internalType": "ParaID",
-              "name": "_bridgeHubParaID",
-              "type": "uint32"
-            }
-          ],
+          "inputs": [],
           "stateMutability": "nonpayable",
           "type": "constructor"
         },
@@ -3657,6 +3931,19 @@
           "inputs": [],
           "name": "UpgradeFailed",
           "type": "error"
+        },
+        {
+          "anonymous": false,
+          "inputs": [
+            {
+              "indexed": false,
+              "internalType": "uint8",
+              "name": "version",
+              "type": "uint8"
+            }
+          ],
+          "name": "Initialized",
+          "type": "event"
         },
         {
           "anonymous": false,
@@ -3862,6 +4149,19 @@
             }
           ],
           "stateMutability": "view",
+          "type": "function"
+        },
+        {
+          "inputs": [
+            {
+              "internalType": "ParaID",
+              "name": "_bridgeHubParaID",
+              "type": "uint32"
+            }
+          ],
+          "name": "initialize",
+          "outputs": [],
+          "stateMutability": "nonpayable",
           "type": "function"
         },
         {

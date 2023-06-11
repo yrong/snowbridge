@@ -33,7 +33,8 @@ contract NativeTokensTest is Test {
 
         outboundQueue = new OutboundQueueMock();
         vault = new TokenVault();
-        nativeTokens = new NativeTokens(vault, outboundQueue, ASSET_HUB, 1);
+        nativeTokens = new NativeTokens();
+        nativeTokens.initialize(vault, outboundQueue, ASSET_HUB, 1);
         vault.grantRole(vault.WITHDRAW_ROLE(), address(nativeTokens));
         vault.grantRole(vault.DEPOSIT_ROLE(), address(nativeTokens));
 

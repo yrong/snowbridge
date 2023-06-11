@@ -77,7 +77,7 @@ contract BeefyClientTest is Test {
         nextSetId = _setId + 1;
         BeefyClient.ValidatorSet memory vset = BeefyClient.ValidatorSet(currentSetId, setSize, root);
         BeefyClient.ValidatorSet memory nextvset = BeefyClient.ValidatorSet(nextSetId, setSize, root);
-        beefyClient.initialize(0, vset, nextvset);
+        beefyClient.forceCheckpoint(0, vset, nextvset);
     }
 
     function testSubmit() public {

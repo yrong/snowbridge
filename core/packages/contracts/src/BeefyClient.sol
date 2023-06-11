@@ -2,7 +2,8 @@
 pragma solidity ^0.8.19;
 
 import {ECDSA} from "openzeppelin/utils/cryptography/ECDSA.sol";
-import {Ownable} from "openzeppelin/access/Ownable.sol";
+import {AccessControl} from "openzeppelin/access/AccessControl.sol";
+import {Initializable} from "openzeppelin/proxy/utils/Initializable.sol";
 import {MerkleProof} from "openzeppelin/utils/cryptography/MerkleProof.sol";
 import {Bitfield} from "./utils/Bitfield.sol";
 import {MMRProof} from "./utils/MMRProof.sol";
@@ -28,7 +29,7 @@ import {ScaleCodec} from "./ScaleCodec.sol";
  * 4. submitFinalWithHandover (with signature proofs specified by (3))
  *
  */
-contract BeefyClient is Ownable {
+contract BeefyClient is AccessControl, Initializable {
     /* Events */
 
     /**
@@ -127,6 +128,8 @@ contract BeefyClient is Ownable {
         bytes32 root;
     }
 
+    bytes32 public constant ADMIN_ROLE = keccak256("ADMIN_ROLE");
+
     /* State */
 
     // The latest verified MMRRoot and corresponding BlockNumber from the Polkadot relay chain
@@ -146,7 +149,7 @@ contract BeefyClient is Ownable {
      * submitInitial and commitPrevRandao. In production this should be set to MAX_SEED_LOOKAHEAD:
      * https://eth2book.info/altair/part3/config/preset#max_seed_lookahead
      */
-    uint256 public immutable randaoCommitDelay;
+    uint256 public randaoCommitDelay;
 
     /**
      * @dev after randaoCommitDelay is reached, relayer must
@@ -154,7 +157,7 @@ contract BeefyClient is Ownable {
      * Without this expiration, relayers can roll the dice infinitely to get the subsampling
      * they desire.
      */
-    uint256 public immutable randaoCommitExpiration;
+    uint256 public randaoCommitExpiration;
 
     /* Errors */
 
@@ -172,21 +175,35 @@ contract BeefyClient is Ownable {
     error PrevRandaoAlreadyCaptured();
     error PrevRandaoNotCaptured();
 
-    constructor(uint256 _randaoCommitDelay, uint256 _randaoCommitExpiration) {
+    constructor() {
+        _grantRole(ADMIN_ROLE, msg.sender);
+        _setRoleAdmin(ADMIN_ROLE, ADMIN_ROLE);
+    }
+
+    // Once-off post-construction call to set initial configuration.
+    function initialize(uint256 _randaoCommitDelay, uint256 _randaoCommitExpiration)
+        public
+        initializer
+        onlyRole(ADMIN_ROLE)
+    {
         randaoCommitDelay = _randaoCommitDelay;
         randaoCommitExpiration = _randaoCommitExpiration;
     }
 
-    // Once-off post-construction call to set initial configuration.
-    function initialize(
+    /**
+     * @dev Submission a new checkpoint from governance to start syncing
+     * @param _initialBeefyBlock contains initial beefy block
+     * @param _initialValidatorSet contains initial validator set
+     * @param _nextValidatorSet contains next validator set
+     */
+    function forceCheckpoint(
         uint64 _initialBeefyBlock,
         ValidatorSet calldata _initialValidatorSet,
         ValidatorSet calldata _nextValidatorSet
-    ) external onlyOwner {
+    ) external onlyRole(ADMIN_ROLE) {
         latestBeefyBlock = _initialBeefyBlock;
         currentValidatorSet = _initialValidatorSet;
         nextValidatorSet = _nextValidatorSet;
-        renounceOwnership();
     }
 
     /* Public Functions */

@@ -16,8 +16,9 @@ contract ParachainClientTest is Test {
     uint32 public constant BRIDGE_HUB_PARA_ID = 1013;
 
     function setUp() public {
-        beefyClient = new BeefyClientMock(3, 8);
-        parachainClient = new ParachainClientMock(beefyClient, BRIDGE_HUB_PARA_ID);
+        beefyClient = new BeefyClientMock(3,8);
+        parachainClient = new ParachainClientMock();
+        parachainClient.initialize(beefyClient, BRIDGE_HUB_PARA_ID);
     }
 
     function testCreateParachainHeaderMerkleLeaf() public {

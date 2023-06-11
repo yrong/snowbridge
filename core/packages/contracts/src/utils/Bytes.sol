@@ -2,7 +2,7 @@
 
 pragma solidity ^0.8.19;
 
-import "./Memory.sol";
+import {Memory} from "./Memory.sol";
 
 library Bytes {
     uint256 internal constant BYTES_HEADER_SIZE = 32;

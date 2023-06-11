@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 pragma solidity ^0.8.19;
 
-import "./utils/Bytes.sol";
+import {Bytes} from "./utils/Bytes.sol";
 
 library ScaleCodec {
     // Sources:

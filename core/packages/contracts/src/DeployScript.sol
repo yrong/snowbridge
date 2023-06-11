@@ -26,28 +26,34 @@ contract DeployScript is Script {
 
         // SovereignTreasury
         Vault vault = new Vault();
-        SovereignTreasury treasury = new SovereignTreasury(vault);
+        SovereignTreasury treasury = new SovereignTreasury();
+        treasury.initialize(vault);
 
         // BeefyClient
         uint256 randaoCommitDelay = vm.envUint("RANDAO_COMMIT_DELAY");
         uint256 randaoCommitExpiration = vm.envUint("RANDAO_COMMIT_EXP");
-        BeefyClient beefyClient = new BeefyClient(randaoCommitDelay, randaoCommitExpiration);
+        BeefyClient beefyClient = new BeefyClient();
+        beefyClient.initialize(randaoCommitDelay, randaoCommitExpiration);
 
         // ParachainClient
         uint32 paraId = uint32(vm.envUint("BRIDGE_HUB_PARAID"));
-        ParachainClient parachainClient = new ParachainClient(beefyClient, paraId);
+        ParachainClient parachainClient = new ParachainClient();
+        parachainClient.initialize(beefyClient, paraId);
 
         // InboundQueue
         uint256 relayerReward = vm.envUint("RELAYER_REWARD");
-        InboundQueue inboundQueue = new InboundQueue(parachainClient, vault, relayerReward);
+        InboundQueue inboundQueue = new InboundQueue();
+        inboundQueue.initialize(parachainClient, vault, relayerReward);
 
         // OutboundQueue
         uint256 relayerFee = vm.envUint("RELAYER_FEE");
-        OutboundQueue outboundQueue = new OutboundQueue(vault, relayerFee);
+        OutboundQueue outboundQueue = new OutboundQueue();
+        outboundQueue.initialize(vault, relayerFee);
 
         // NativeTokens
         TokenVault tokenVault = new TokenVault();
-        NativeTokens nativeTokens = new NativeTokens(
+        NativeTokens nativeTokens = new NativeTokens();
+        nativeTokens.initialize(
             tokenVault,
             outboundQueue,
             ParaID.wrap(uint32(vm.envUint("ASSET_HUB_PARAID"))),
@@ -59,7 +65,8 @@ contract DeployScript is Script {
         new WETH9();
 
         // Upgrades
-        UpgradeProxy upgradeProxy = new UpgradeProxy(ParaID.wrap(paraId));
+        UpgradeProxy upgradeProxy = new UpgradeProxy();
+        upgradeProxy.initialize(ParaID.wrap(paraId));
 
         // Allow inbound queue to send messages to handlers
         nativeTokens.grantRole(nativeTokens.SENDER_ROLE(), address(inboundQueue));
@@ -80,6 +87,8 @@ contract DeployScript is Script {
         tokenVault.grantRole(tokenVault.DEPOSIT_ROLE(), address(nativeTokens));
 
         // Move ownership of everything to Upgrades app
+        beefyClient.grantRole(beefyClient.ADMIN_ROLE(), address(upgradeProxy));
+        beefyClient.revokeRole(treasury.ADMIN_ROLE(), address(this));
 
         treasury.grantRole(treasury.ADMIN_ROLE(), address(upgradeProxy));
         treasury.revokeRole(treasury.ADMIN_ROLE(), address(this));

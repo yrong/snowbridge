@@ -25,14 +25,17 @@ contract InboundQueueTest is Test {
     bytes public parachainHeaderProof = bytes("validProof");
 
     function setUp() public {
-        IParachainClient parachainClient = new ParachainClientMock(BeefyClient(address(0)), 0);
+        ParachainClientMock parachainClient = new ParachainClientMock();
+        parachainClient.initialize(BeefyClient(address(0)), 0);
+
         recipient = new RecipientMock();
 
         vault = new Vault();
 
         deal(address(this), 100 ether);
 
-        channel = new InboundQueue(parachainClient, vault, 1 ether);
+        channel = new InboundQueue();
+        channel.initialize(parachainClient, vault, 1 ether);
         channel.updateHandler(1, IRecipient(recipient));
         vault.grantRole(vault.WITHDRAW_ROLE(), address(channel));
     }

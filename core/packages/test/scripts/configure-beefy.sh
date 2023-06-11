@@ -25,7 +25,7 @@ configure_beefy()
     # sometimes sending transact with cast will fail on the goerli network
     # temporarily resolved by manually setting --gas-price and --gas-limit
     cast send $(address_for BeefyClient) \
-    	"initialize(uint64,(uint128,uint128,bytes32),(uint128,uint128,bytes32))" \
+    	"forceCheckpoint(uint64,(uint128,uint128,bytes32),(uint128,uint128,bytes32))" \
     	--rpc-url $eth_endpoint_http \
     	--private-key $PRIVATE_KEY \
     	--gas-limit $eth_gas_limit \

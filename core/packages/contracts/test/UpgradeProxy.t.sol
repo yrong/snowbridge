@@ -23,8 +23,11 @@ contract UpgradeProxyTest is Test {
     ParaID origin = ParaID.wrap(1001);
 
     function setUp() public {
-        upgradeProxy = new UpgradeProxy(origin);
-        outboundQueue = new OutboundQueue(new Vault(), 1 ether);
+        upgradeProxy = new UpgradeProxy();
+        upgradeProxy.initialize(origin);
+
+        outboundQueue = new OutboundQueue();
+        outboundQueue.initialize(new Vault(), 1 ether);
 
         outboundQueue.grantRole(outboundQueue.ADMIN_ROLE(), address(upgradeProxy));
         outboundQueue.revokeRole(outboundQueue.ADMIN_ROLE(), address(this));

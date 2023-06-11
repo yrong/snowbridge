@@ -16,7 +16,8 @@ contract OutboundQueueTest is Test {
 
     function setUp() public {
         vault = new Vault();
-        channel = new OutboundQueue(vault, 1 ether);
+        channel = new OutboundQueue();
+        channel.initialize(vault, 1 ether);
         channel.grantRole(channel.SUBMIT_ROLE(), address(this));
     }
 

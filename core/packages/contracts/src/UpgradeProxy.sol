@@ -2,11 +2,12 @@
 pragma solidity ^0.8.19;
 
 import {AccessControl} from "openzeppelin/access/AccessControl.sol";
+import {Initializable} from "openzeppelin/proxy/utils/Initializable.sol";
 import {IVault} from "./IVault.sol";
 import {IUpgradeTask} from "./IUpgradeTask.sol";
 import {ParaID} from "./Types.sol";
 
-contract UpgradeProxy is AccessControl {
+contract UpgradeProxy is AccessControl,Initializable {
     bytes32 public constant ADMIN_ROLE = keccak256("ADMIN_ROLE");
     bytes32 public constant SENDER_ROLE = keccak256("SENDER_ROLE");
 
@@ -15,9 +16,7 @@ contract UpgradeProxy is AccessControl {
         bytes payload;
     }
 
-    enum Action {
-        Upgrade
-    }
+    enum Action {Upgrade}
 
     struct UpgradePayload {
         address task;
@@ -28,12 +27,15 @@ contract UpgradeProxy is AccessControl {
     error UpgradeFailed();
 
     // Parachain ID of BridgeHub
-    ParaID public immutable bridgeHubParaID;
+    ParaID public bridgeHubParaID;
 
-    constructor(ParaID _bridgeHubParaID) {
+    constructor() {
         _grantRole(ADMIN_ROLE, msg.sender);
         _setRoleAdmin(SENDER_ROLE, ADMIN_ROLE);
         _setRoleAdmin(ADMIN_ROLE, ADMIN_ROLE);
+    }
+
+    function initialize(ParaID _bridgeHubParaID) public initializer onlyRole(ADMIN_ROLE) {
         bridgeHubParaID = _bridgeHubParaID;
     }
 
