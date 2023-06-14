@@ -16,16 +16,13 @@ on:
   workflow_dispatch:
 
 jobs:
-  check:
-    runs-on: snowbridge-runner
-    env:
-      CARGO_INCREMENTAL: 0
-      RUST_BACKTRACE: 1
-      RUSTFLAGS: -C debuginfo=1
-      SKIP_WASM_BUILD: 1
+  prepare:
+    runs-on: ubuntu-20.04
     steps:
-      - uses: actions/checkout@v2
-      - uses: actions/cache@v1
+      - uses: actions/checkout@v3
+        with:
+          submodules: 'true'
+      - uses: actions/cache@v3
         with:
           path: |
             ~/.cargo/registry
@@ -33,99 +30,35 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('parachain/Cargo.lock') }}
           restore-keys: |
             ${{ runner.os }}-cargo-
-      - name: install protoc
-        uses: arduino/setup-protoc@v1
-        with:
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
-      - uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: nightly-2023-04-22
-          target: wasm32-unknown-unknown
+      - uses: ./.github/actions/install_toolchain
+
+  build:
+    needs: prepare
+    runs-on: ubuntu-20.04
+    env:
+      CARGO_INCREMENTAL: 0
+      RUST_BACKTRACE: 1
+      RUSTFLAGS: -C debuginfo=1
+      SKIP_WASM_BUILD: 1
+    steps:
       - name: cargo check
-        uses: actions-rs/cargo@v1
-        with:
-          command: check
-          toolchain: nightly-2023-04-22
-          args: >-
-            --manifest-path parachain/Cargo.toml
-            --workspace
-            --features runtime-benchmarks
-  test:
-    needs: check
-    runs-on: snowbridge-runner
-    env:
-      CARGO_INCREMENTAL: 0
-      RUST_BACKTRACE: 1
-      RUSTFLAGS: -C debuginfo=1
-      SKIP_WASM_BUILD: 1
-    steps:
-      - uses: actions/checkout@v2
-        with:
-          ref: ${{ github.head_ref }}
-      - uses: actions/cache@v1
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-          key: ${{ runner.os }}-cargo-${{ hashFiles('parachain/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-
-      - uses: arduino/setup-protoc@v1
-      - uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: nightly-2023-04-22
-          target: wasm32-unknown-unknown
-      # Increase stack limit for beacon light client tests
-      - run: sudo prlimit --pid $$ --stack=32768
-      # Run tests for everything except the beacon light client
-      - uses: actions-rs/cargo@v1
-        with:
-          command: test
-          args: >-
-            --manifest-path parachain/Cargo.toml
-            --workspace
-            --features runtime-benchmarks
-            --exclude snowbridge-query-events
-            --exclude snowbridge-ethereum-beacon-client
-          toolchain: nightly-2023-04-22
-      # Run tests for beacon light client, excluding benchmark tests
-      - uses: actions-rs/cargo@v1
-        with:
-          command: test
-          args: >-
-            --manifest-path parachain/Cargo.toml
-            --package snowbridge-ethereum-beacon-client
-          toolchain: nightly-2023-04-22
-      # Run benchmark tests for beacon light client
-      - uses: actions-rs/cargo@v1
-        with:
-          command: test
-          args: >-
-            --manifest-path parachain/Cargo.toml
-            --release
-            --features runtime-benchmarks
-            --package snowbridge-ethereum-beacon-client
-          toolchain: nightly-2023-04-22
+        run: cargo check --manifest-path parachain/Cargo.toml --workspace --features runtime-benchmarks
+      - name: cargo test
+        run: cargo test --manifest-path parachain/Cargo.toml --workspace --features runtime-benchmarks --exclude snowbridge-query-events --exclude snowbridge-ethereum-beacon-client
+      - name: cargo test beacon client
+        run: cargo test --manifest-path parachain/Cargo.toml --package snowbridge-ethereum-beacon-client
+      - name: cargo test beacon client with mainnet fixtures
+        run: cargo test --manifest-path parachain/Cargo.toml --release --features runtime-benchmarks --package snowbridge-ethereum-beacon-client
+        
   coverage:
-    needs: check
-    runs-on: snowbridge-runner
+    needs: build
+    runs-on: ubuntu-20.04
     env:
       CARGO_INCREMENTAL: 0
       RUST_BACKTRACE: 1
       RUSTFLAGS: -C debuginfo=1
       SKIP_WASM_BUILD: 1
     steps:
-      - uses: actions/checkout@v2
-        with:
-          ref: ${{ github.head_ref }}
-      - uses: arduino/setup-protoc@v1
-      - uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: nightly-2023-04-22
-          target: wasm32-unknown-unknown
       - run: cargo install cargo-tarpaulin
       - run: >-
           cargo tarpaulin 
@@ -140,3 +73,9 @@ jobs:
         with:
           working-directory: parachain
           files: cobertura.xml
+
+  check-cumulus:
+    needs: prepare
+    runs-on: ubuntu-20.04
+    steps:
+      - run: cargo check --manifest-path cumulus/Cargo.toml --release --verbose --package bridge-hub-rococo-runtime

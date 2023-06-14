@@ -11,13 +11,14 @@ on:
     paths:
       - "core/**"
       - "!core/**/README.md"
+  workflow_dispatch:
 
 jobs:
   build:
     runs-on: snowbridge-runner
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v1
+      - uses: actions/checkout@v3
         with:
           fetch-depth: 2
       - uses: pnpm/action-setup@v2.0.1

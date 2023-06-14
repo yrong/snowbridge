@@ -13,8 +13,8 @@ jobs:
       CARGO_INCREMENTAL: 0
       RUST_BACKTRACE: 1
     steps:
-      - uses: actions/checkout@v2
-      - uses: actions/cache@v1
+      - uses: actions/checkout@v3
+      - uses: actions/cache@v3
         with:
           path: |
             ~/.cargo/registry
@@ -22,11 +22,7 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('parachain/Cargo.lock') }}
           restore-keys: |
             ${{ runner.os }}-cargo-
-      - uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: nightly-2023-04-22
-          target: wasm32-unknown-unknown
+      - uses: ./.github/actions/install_toolchain
       - name: build
         uses: actions-rs/cargo@v1
         with:
