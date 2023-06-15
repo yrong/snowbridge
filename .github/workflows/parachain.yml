@@ -98,9 +98,11 @@ jobs:
       - uses: actions/checkout@v2
         with:
           ref: ${{ github.head_ref }}
-      - run: (cd parachain && rustup show)
-      - run: cargo install cargo-tarpaulin
-      - run: >-
+      - name: setup rust toolchain
+        run: (cd parachain && rustup show)
+      - name: run cargo tarpaulin coverage test
+        run: >
+          cargo install cargo-tarpaulin &&
           cargo tarpaulin 
           --manifest-path parachain/Cargo.toml
           --workspace
@@ -113,3 +115,21 @@ jobs:
         with:
           working-directory: parachain
           files: cobertura.xml
+
+  check-cumulus-bridgehub:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+        with:
+          submodules: 'true'
+      - uses: arduino/setup-protoc@v2
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: setup rust toolchain
+        run: (cd parachain && rustup show)
+      - name: check bridgehub runtime
+        run: >
+          cargo check 
+          --manifest-path cumulus/Cargo.toml 
+          --release --verbose 
+          --package bridge-hub-rococo-runtime
