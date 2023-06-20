@@ -264,7 +264,7 @@ contract BeefyClient is Ownable {
             revert PrevRandaoNotCaptured();
         }
 
-        if (commitment.validatorSetID != currentValidatorSet.id && commitment.validatorSetID != nextValidatorSet.id) {
+        if (commitment.validatorSetID != currentValidatorSet.id) {
             revert InvalidCommitment();
         }
 
