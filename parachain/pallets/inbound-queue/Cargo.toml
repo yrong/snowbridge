@@ -11,9 +11,9 @@ targets = ["x86_64-unknown-linux-gnu"]
 
 [dependencies]
 serde = { version = "1.0.188", optional = true }
-codec = { version = "3.6.1", package = "parity-scale-codec", default-features = false, features = [ "derive" ] }
-scale-info = { version = "2.9.0", default-features = false, features = [ "derive" ] }
-hex-literal = { version = "0.4.1", optional = true }
+codec = { version = "3.6.1", package = "parity-scale-codec", default-features = false, features = ["derive"] }
+scale-info = { version = "2.9.0", default-features = false, features = ["derive"] }
+hex-literal = { version = "0.4.1" }
 log = { version = "0.4.20", default-features = false }
 alloy-primitives = { version = "0.4.2", default-features = false, features = ["rlp"] }
 alloy-sol-types = { version = "0.4.2", default-features = false }
@@ -35,14 +35,12 @@ xcm-builder = { package = "staging-xcm-builder", path = "../../../polkadot-sdk/p
 snowbridge-core = { path = "../../primitives/core", default-features = false }
 snowbridge-ethereum = { path = "../../primitives/ethereum", default-features = false }
 snowbridge-router-primitives = { path = "../../primitives/router", default-features = false }
-snowbridge-beacon-primitives = { path = "../../primitives/beacon", default-features = false, optional = true }
+snowbridge-beacon-primitives = { path = "../../primitives/beacon", default-features = false }
 
 [dev-dependencies]
 frame-benchmarking = { path = "../../../polkadot-sdk/substrate/frame/benchmarking" }
 sp-keyring = { path = "../../../polkadot-sdk/substrate/primitives/keyring" }
-snowbridge-beacon-primitives = { path = "../../primitives/beacon" }
 snowbridge-ethereum-beacon-client = { path = "../../pallets/ethereum-beacon-client" }
-hex-literal = { version = "0.4.1" }
 
 [features]
 default = ["std"]
@@ -66,6 +64,7 @@ std = [
     "snowbridge-core/std",
     "snowbridge-ethereum/std",
     "snowbridge-router-primitives/std",
+    "snowbridge-beacon-primitives/std",
     "xcm/std",
     "xcm-builder/std",
 ]
@@ -74,7 +73,5 @@ runtime-benchmarks = [
     "frame-benchmarking",
     "frame-support/runtime-benchmarks",
     "frame-system/runtime-benchmarks",
-    "hex-literal",
-    "snowbridge-beacon-primitives",
     "xcm-builder/runtime-benchmarks",
 ]

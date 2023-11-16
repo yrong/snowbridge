@@ -33,8 +33,14 @@ use snowbridge_beacon_primitives::CompactExecutionHeader;
 
 pub mod weights;
 
+#[cfg(any(feature = "runtime-benchmarks", test))]
+mod fixtures;
+
 #[cfg(test)]
 mod test;
+
+#[cfg(test)]
+mod mock;
 
 use codec::{Decode, DecodeAll, Encode};
 use envelope::Envelope;
@@ -56,7 +62,7 @@ use xcm::prelude::{
 };
 
 use snowbridge_core::{
-	inbound::{Message, VerificationError, Verifier},
+	inbound::{Log, Message, VerificationError, Verifier},
 	sibling_sovereign_account, BasicOperatingMode, Channel, ChannelId, ChannelLookup, ParaId,
 };
 use snowbridge_router_primitives::{
@@ -148,6 +154,7 @@ pub mod pallet {
 	}
 
 	#[pallet::error]
+	#[cfg_attr(feature = "std", derive(PartialEq))]
 	pub enum Error<T> {
 		/// Message came from an invalid outbound channel on the Ethereum side.
 		InvalidGateway,
@@ -223,15 +230,10 @@ pub mod pallet {
 				.map_err(|e| Error::<T>::Verification(e))?;
 
 			// Decode event log into an Envelope
-			let envelope =
-				Envelope::try_from(message.event_log).map_err(|_| Error::<T>::InvalidEnvelope)?;
-
-			// Verify that the message was submitted from the known Gateway contract
-			ensure!(T::GatewayAddress::get() == envelope.gateway, Error::<T>::InvalidGateway);
+			let envelope = Self::decode(message.event_log)?;
 
 			// Retrieve the registered channel for this message
-			let channel: Channel =
-				T::ChannelLookup::lookup(envelope.channel_id).ok_or(Error::<T>::InvalidChannel)?;
+			let channel = Self::validate(&envelope)?;
 
 			// Verify message nonce
 			<Nonce<T>>::try_mutate(envelope.channel_id, |nonce| -> DispatchResult {
@@ -310,6 +312,21 @@ pub mod pallet {
 			let dest = MultiLocation { parents: 1, interior: X1(Parachain(dest.into())) };
 			let (xcm_hash, _) = send_xcm::<T::XcmSender>(dest, xcm).map_err(Error::<T>::from)?;
 			Ok(xcm_hash)
+		}
+
+		pub fn decode(log: Log) -> Result<Envelope, Error<T>> {
+			let envelope = Envelope::try_from(log).map_err(|_| Error::<T>::InvalidEnvelope)?;
+			Ok(envelope)
+		}
+
+		pub fn validate(envelope: &Envelope) -> Result<Channel, Error<T>> {
+			// Verify that the message was submitted from the known Gateway contract
+			ensure!(T::GatewayAddress::get() == envelope.gateway, Error::<T>::InvalidGateway);
+
+			// Retrieve the registered channel for this message
+			let channel: Channel =
+				T::ChannelLookup::lookup(envelope.channel_id).ok_or(Error::<T>::InvalidChannel)?;
+			Ok(channel)
 		}
 	}
 }

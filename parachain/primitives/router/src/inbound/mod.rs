@@ -99,6 +99,7 @@ pub struct MessageToXcm<
 
 /// Reason why a message conversion failed.
 #[derive(Copy, Clone, TypeInfo, PalletError, Encode, Decode, RuntimeDebug)]
+#[cfg_attr(feature = "std", derive(PartialEq))]
 pub enum ConvertMessageError {
 	/// The message version is not supported for conversion.
 	UnsupportedVersion,
