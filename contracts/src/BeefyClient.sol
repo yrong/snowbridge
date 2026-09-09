@@ -3,6 +3,7 @@
 pragma solidity 0.8.34;
 
 import {ECDSA} from "openzeppelin/utils/cryptography/ECDSA.sol";
+import {MerkleProof} from "openzeppelin/utils/cryptography/MerkleProof.sol";
 import {SubstrateMerkleProof} from "./utils/SubstrateMerkleProof.sol";
 import {Bitfield} from "./utils/Bitfield.sol";
 import {Uint16Array, createUint16Array} from "./utils/Uint16Array.sol";
@@ -103,6 +104,9 @@ contract BeefyClient {
         address account;
         // Merkle proof for the validator
         bytes32[] proof;
+        // Proves this signature was already committed to the ticket's/challenge's sigRoot
+        // before the sample was known (SNOWBSC-689 fix) - see `verifySignatureOpening`.
+        bytes32[] sigProof;
     }
 
     /**
@@ -119,6 +123,12 @@ contract BeefyClient {
         uint256 prevRandao;
         // Hash of a bitfield claiming which validators have signed
         bytes32 bitfieldHash;
+        // Merkle root over a canonical, positional signature vector (SNOWBSC-689 fix):
+        // leaf i is the real (index, v, r, s) signature if validator i is claimed to have
+        // signed, or EMPTY_SIG_LEAF otherwise. Committed here, before prevRandao/the
+        // Fiat-Shamir challenge is derived, so a sampled response must have existed prior to
+        // the challenge rather than being acquired afterward.
+        bytes32 sigRoot;
     }
 
     /// @dev The MMRLeaf describes the leaf structure of the MMR
@@ -188,6 +198,14 @@ contract BeefyClient {
      * @dev Fiat-Shamir domain separator ID
      */
     bytes public constant FIAT_SHAMIR_DOMAIN_ID = bytes("SNOWBRIDGE-FIAT-SHAMIR-V1");
+
+    /**
+     * @dev Sentinel leaf for a position in the signature-vector tree (see `Ticket.sigRoot`)
+     * that is not claimed as signed. Domain-separated from real leaves, which are
+     * double-hashed per OpenZeppelin's `MerkleProof` convention (`_signatureLeaf` below), so it
+     * cannot collide with one.
+     */
+    bytes32 public constant EMPTY_SIG_LEAF = keccak256("SNOWBRIDGE-EMPTY-SIG-LEAF");
 
     /**
      * @dev Beefy payload id for MMR Root payload items:
@@ -274,11 +292,18 @@ contract BeefyClient {
      * @dev Begin submission of commitment
      * @param commitment contains the commitment signed by the validators
      * @param bitfield a bitfield claiming which validators have signed the commitment
-     * @param proof a proof that a single validator from currentValidatorSet has signed the commitment
+     * @param sigRoot Merkle root over a canonical positional signature vector: leaf i is the
+     * real signature if validator i is claimed to have signed, or EMPTY_SIG_LEAF otherwise.
+     * Committed here, before prevRandao is captured, so that the interactive sample cannot be
+     * learned before the prover holds the signatures it will need to answer with
+     * (SNOWBSC-689 fix).
+     * @param proof a proof that a single validator from currentValidatorSet has signed the
+     * commitment; `proof.sigProof` proves the signature is the leaf at `proof.index` in `sigRoot`
      */
     function submitInitial(
         Commitment calldata commitment,
         uint256[] calldata bitfield,
+        bytes32 sigRoot,
         ValidatorProof calldata proof
     ) external {
         if (commitment.blockNumber <= latestBeefyBlock) {
@@ -314,6 +339,11 @@ contract BeefyClient {
             revert InvalidSignature();
         }
 
+        // Check that this signature was committed to sigRoot (SNOWBSC-689 fix).
+        if (!verifySignatureOpening(sigRoot, proof)) {
+            revert InvalidSignature();
+        }
+
         // For the initial submission, the supplied bitfield should claim that more than
         // two thirds of the validator set have sign the commitment
         if (
@@ -336,7 +366,8 @@ contract BeefyClient {
                 )
             ),
             prevRandao: 0,
-            bitfieldHash: keccak256(abi.encodePacked(bitfield))
+            bitfieldHash: keccak256(abi.encodePacked(bitfield)),
+            sigRoot: sigRoot
         });
 
         emit NewTicket(msg.sender, commitment.blockNumber);
@@ -413,22 +444,7 @@ contract BeefyClient {
         bytes32 newMMRRoot = ensureProvidesMMRRoot(commitment);
 
         if (is_next_session) {
-            // The id for candidate nextValidatorSet should be greater than the current
-            // nextValidatorSet id
-            if (leaf.nextAuthoritySetID <= nextValidatorSet.id) {
-                revert InvalidMMRLeaf();
-            }
-            bool leafIsValid = MMRProof.verifyLeafProof(
-                newMMRRoot, keccak256(encodeMMRLeaf(leaf)), leafProof, leafProofOrder
-            );
-            if (!leafIsValid) {
-                revert InvalidMMRLeafProof();
-            }
-            currentValidatorSet = nextValidatorSet;
-            nextValidatorSet.id = leaf.nextAuthoritySetID;
-            nextValidatorSet.length = leaf.nextAuthoritySetLen;
-            nextValidatorSet.root = leaf.nextAuthoritySetRoot;
-            nextValidatorSet.usageCounters = createUint16Array(leaf.nextAuthoritySetLen);
+            applyNextSession(newMMRRoot, leaf, leafProof, leafProofOrder);
         }
 
         latestMMRRoot = newMMRRoot;
@@ -500,9 +516,15 @@ contract BeefyClient {
      * @param commitment contains the full commitment that was used for the commitmentHash
      * @param bitfield claiming which validators have signed the commitment
      */
+    /**
+     * @param sigRoot Merkle root over the canonical positional signature vector this caller
+     * intends to commit before deriving the challenge (SNOWBSC-689 fix) - the returned sample
+     * is only the one that will actually be verified if this exact `sigRoot` is submitted.
+     */
     function createFiatShamirFinalBitfield(
         Commitment calldata commitment,
-        uint256[] calldata bitfield
+        uint256[] calldata bitfield,
+        bytes32 sigRoot
     ) external view returns (uint256[] memory) {
         ValidatorSetState storage vset = currentValidatorSet;
         if (commitment.validatorSetID == nextValidatorSet.id) {
@@ -520,14 +542,18 @@ contract BeefyClient {
 
         bytes32 commitmentHash = keccak256(encodeCommitment(commitment));
 
-        return fiatShamirFinalBitfield(commitmentHash, bitfield, vset);
+        return fiatShamirFinalBitfield(commitmentHash, bitfield, sigRoot, vset);
     }
 
     /**
      * @dev Submit a commitment and leaf using the Fiat-Shamir approach
      * @param commitment contains the full commitment that was used for the commitmentHash
      * @param bitfield claiming which validators have signed the commitment
-     * @param proofs a struct containing the data needed to verify all validator signatures
+     * @param sigRoot Merkle root over a canonical positional signature vector, committed before
+     * this challenge is derived (SNOWBSC-689 fix): leaf i is the real signature if validator i
+     * is claimed to have signed, or EMPTY_SIG_LEAF otherwise
+     * @param proofs a struct containing the data needed to verify all validator signatures;
+     * `proofs[i].sigProof` proves the signature is the leaf at `proofs[i].index` in `sigRoot`
      * @param leaf an MMR leaf provable using the MMR root in the commitment payload
      * @param leafProof an MMR leaf proof
      * @param leafProofOrder a bitfield describing the order of each item (left vs right)
@@ -535,6 +561,7 @@ contract BeefyClient {
     function submitFiatShamir(
         Commitment calldata commitment,
         uint256[] calldata bitfield,
+        bytes32 sigRoot,
         ValidatorProof[] calldata proofs,
         MMRLeaf calldata leaf,
         bytes32[] calldata leafProof,
@@ -544,8 +571,34 @@ contract BeefyClient {
             revert StaleCommitment();
         }
 
-        bool is_next_session = false;
-        ValidatorSetState storage vset = currentValidatorSet;
+        (ValidatorSetState storage vset, bool is_next_session) =
+            selectFiatShamirVset(commitment, bitfield);
+
+        bytes32 newMMRRoot = ensureProvidesMMRRoot(commitment);
+
+        bytes32 commitmentHash = keccak256(encodeCommitment(commitment));
+        verifyFiatShamirCommitment(commitmentHash, bitfield, sigRoot, vset, proofs);
+
+        if (is_next_session) {
+            applyNextSession(newMMRRoot, leaf, leafProof, leafProofOrder);
+        }
+
+        latestMMRRoot = newMMRRoot;
+        latestBeefyBlock = commitment.blockNumber;
+
+        emit NewMMRRoot(newMMRRoot, commitment.blockNumber);
+    }
+
+    /* Internal Functions */
+
+    // Selects the validator set a Fiat-Shamir commitment claims against, and validates the
+    // claim bitfield. Split out of submitFiatShamir to keep its stack depth compilable.
+    function selectFiatShamirVset(Commitment calldata commitment, uint256[] calldata bitfield)
+        internal
+        view
+        returns (ValidatorSetState storage vset, bool is_next_session)
+    {
+        vset = currentValidatorSet;
         if (commitment.validatorSetID == nextValidatorSet.id) {
             is_next_session = true;
             vset = nextValidatorSet;
@@ -562,38 +615,33 @@ contract BeefyClient {
         // Validate that all padding bits (beyond vset.length) are zero
         // This ensures the bitfield was created by createInitialBitfield or equivalent
         Bitfield.validatePadding(bitfield, vset.length);
-
-        bytes32 newMMRRoot = ensureProvidesMMRRoot(commitment);
-
-        bytes32 commitmentHash = keccak256(encodeCommitment(commitment));
-        verifyFiatShamirCommitment(commitmentHash, bitfield, vset, proofs);
-
-        if (is_next_session) {
-            // The id for candidate nextValidatorSet should be greater than the current
-            // nextValidatorSet id
-            if (leaf.nextAuthoritySetID <= nextValidatorSet.id) {
-                revert InvalidMMRLeaf();
-            }
-            bool leafIsValid = MMRProof.verifyLeafProof(
-                newMMRRoot, keccak256(encodeMMRLeaf(leaf)), leafProof, leafProofOrder
-            );
-            if (!leafIsValid) {
-                revert InvalidMMRLeafProof();
-            }
-            currentValidatorSet = nextValidatorSet;
-            nextValidatorSet.id = leaf.nextAuthoritySetID;
-            nextValidatorSet.length = leaf.nextAuthoritySetLen;
-            nextValidatorSet.root = leaf.nextAuthoritySetRoot;
-            nextValidatorSet.usageCounters = createUint16Array(leaf.nextAuthoritySetLen);
-        }
-
-        latestMMRRoot = newMMRRoot;
-        latestBeefyBlock = commitment.blockNumber;
-
-        emit NewMMRRoot(newMMRRoot, commitment.blockNumber);
     }
 
-    /* Internal Functions */
+    // Shared by submitFinal and submitFiatShamir: install the authenticated next validator
+    // set as current, and load the candidate successor from the MMR leaf.
+    function applyNextSession(
+        bytes32 newMMRRoot,
+        MMRLeaf calldata leaf,
+        bytes32[] calldata leafProof,
+        uint256 leafProofOrder
+    ) internal {
+        // The id for candidate nextValidatorSet should be greater than the current
+        // nextValidatorSet id
+        if (leaf.nextAuthoritySetID <= nextValidatorSet.id) {
+            revert InvalidMMRLeaf();
+        }
+        bool leafIsValid = MMRProof.verifyLeafProof(
+            newMMRRoot, keccak256(encodeMMRLeaf(leaf)), leafProof, leafProofOrder
+        );
+        if (!leafIsValid) {
+            revert InvalidMMRLeafProof();
+        }
+        currentValidatorSet = nextValidatorSet;
+        nextValidatorSet.id = leaf.nextAuthoritySetID;
+        nextValidatorSet.length = leaf.nextAuthoritySetLen;
+        nextValidatorSet.root = leaf.nextAuthoritySetRoot;
+        nextValidatorSet.usageCounters = createUint16Array(leaf.nextAuthoritySetLen);
+    }
 
     // Creates a unique ticket ID for a new interactive prover-verifier session
     function createTicketID(address account, bytes32 commitmentHash)
@@ -649,6 +697,35 @@ contract BeefyClient {
     }
 
     /**
+     * @dev The leaf for position `index` in the `Ticket.sigRoot` signature-vector tree.
+     * Double-hashed per OpenZeppelin's `MerkleProof` convention, so a leaf value can never be
+     * replayed as an internal node (and vice versa) when reconstructing the root. The position
+     * is bound into the leaf so a proof cannot be replayed at a different index.
+     */
+    function _signatureLeaf(uint256 index, uint8 v, bytes32 r, bytes32 s)
+        internal
+        pure
+        returns (bytes32)
+    {
+        return keccak256(bytes.concat(keccak256(abi.encode(index, v, r, s))));
+    }
+
+    /**
+     * @dev Check that `proof`'s signature was already committed to `sigRoot` at `proof.index`,
+     * via `proof.sigProof`. This is the SNOWBSC-689 fix: `sigRoot` is fixed before the challenge
+     * (prevRandao / Fiat-Shamir hash) is derived, so a response can only pass this check if the
+     * prover already held it at commit time - it cannot be acquired after learning the sample.
+     */
+    function verifySignatureOpening(bytes32 sigRoot, ValidatorProof calldata proof)
+        internal
+        pure
+        returns (bool)
+    {
+        bytes32 leaf = _signatureLeaf(proof.index, proof.v, proof.r, proof.s);
+        return MerkleProof.verifyCalldata(proof.sigProof, sigRoot, leaf);
+    }
+
+    /**
      * @dev Verify commitment using the supplied signature proofs
      */
     function verifyCommitment(
@@ -687,6 +764,12 @@ contract BeefyClient {
                 revert InvalidSignature();
             }
 
+            // Check that this exact signature was committed to ticket.sigRoot before the
+            // prevRandao challenge was captured (SNOWBSC-689 fix).
+            if (!verifySignatureOpening(ticket.sigRoot, proof)) {
+                revert InvalidSignature();
+            }
+
             // Ensure no validator can appear more than once in bitfield
             Bitfield.unset(finalbitfield, proof.index);
         }
@@ -698,6 +781,7 @@ contract BeefyClient {
     function verifyFiatShamirCommitment(
         bytes32 commitmentHash,
         uint256[] calldata bitfield,
+        bytes32 sigRoot,
         ValidatorSetState storage vset,
         ValidatorProof[] calldata proofs
     ) internal view {
@@ -708,7 +792,8 @@ contract BeefyClient {
             revert InvalidValidatorProofLength();
         }
 
-        uint256[] memory finalbitfield = fiatShamirFinalBitfield(commitmentHash, bitfield, vset);
+        uint256[] memory finalbitfield =
+            fiatShamirFinalBitfield(commitmentHash, bitfield, sigRoot, vset);
 
         for (uint256 i = 0; i < proofs.length; i++) {
             ValidatorProof calldata proof = proofs[i];
@@ -728,6 +813,12 @@ contract BeefyClient {
                 revert InvalidSignature();
             }
 
+            // Check that this exact signature was committed to sigRoot before the Fiat-Shamir
+            // challenge was derived from it (SNOWBSC-689 fix).
+            if (!verifySignatureOpening(sigRoot, proof)) {
+                revert InvalidSignature();
+            }
+
             // Ensure no validator can appear more than once in bitfield
             Bitfield.unset(finalbitfield, proof.index);
         }
@@ -736,6 +827,7 @@ contract BeefyClient {
     function createFiatShamirHash(
         bytes32 commitmentHash,
         bytes32 bitFieldHash,
+        bytes32 sigRoot,
         ValidatorSetState storage vset
     ) internal view returns (bytes32) {
         return sha256(
@@ -745,6 +837,7 @@ contract BeefyClient {
                     bytes.concat(
                         commitmentHash,
                         bitFieldHash,
+                        sigRoot,
                         vset.root,
                         bytes32(uint256(vset.id)),
                         bytes32(uint256(vset.length))
@@ -758,15 +851,18 @@ contract BeefyClient {
      * @dev Helper to create a final bitfield with subsampled validator selections using the Fiat-Shamir approach
      * @param commitmentHash the hash of the full commitment that was used for the commitmentHash
      * @param bitfield claiming which validators have signed the commitment
+     * @param sigRoot Merkle root over the canonical positional signature vector, committed
+     * before this challenge is derived (SNOWBSC-689 fix)
      * @param vset the validator set state
      */
     function fiatShamirFinalBitfield(
         bytes32 commitmentHash,
         uint256[] calldata bitfield,
+        bytes32 sigRoot,
         ValidatorSetState storage vset
     ) internal view returns (uint256[] memory) {
         bytes32 bitFieldHash = keccak256(abi.encodePacked(bitfield));
-        bytes32 fiatShamirHash = createFiatShamirHash(commitmentHash, bitFieldHash, vset);
+        bytes32 fiatShamirHash = createFiatShamirHash(commitmentHash, bitFieldHash, sigRoot, vset);
         uint256 requiredSignatures =
             Math.min(fiatShamirRequiredSignatures, computeMaxRequiredSignatures(vset.length));
         return

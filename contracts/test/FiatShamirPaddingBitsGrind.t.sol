@@ -3,6 +3,7 @@ import {Test} from "forge-std/Test.sol";
 import {BeefyClient} from "../src/BeefyClient.sol";
 import {Bitfield} from "../src/utils/Bitfield.sol";
 import {ScaleCodec} from "../src/utils/ScaleCodec.sol";
+import {SigTreeLib} from "./utils/SigTreeLib.sol";
 
 contract FiatShamirPaddingBitsGrindTest is Test {
     using Bitfield for uint256[];
@@ -59,14 +60,18 @@ contract FiatShamirPaddingBitsGrindTest is Test {
         uint256[] memory bitfield0 = new uint256[](1);
         bitfield0[0] = baseMeaningful;
         assertEq(bitfield0.countSetBits(N), 11, "quorum bits must be 11");
-        uint256[] memory sampled0 = beefy.createFiatShamirFinalBitfield(commitment, bitfield0);
-        // proofs ONLY for indices [0..5] (attacker-controlled keys)
+        // proofs ONLY for indices [0..5] (attacker-controlled keys). Built before sampling and
+        // committed via sigRoot, matching how a real prover must supply it (SNOWBSC-689 fix) -
+        // otherwise a placeholder root would spuriously fail on any of these six that DO land in
+        // the sample by chance, masking the property this test actually checks.
         BeefyClient.ValidatorProof[] memory attackerProofs = _buildProofs(commitmentHash, 0, 6);
+        bytes32 sigRoot = _attachSigTree(attackerProofs);
+        uint256[] memory sampled0 = beefy.createFiatShamirFinalBitfield(commitment, bitfield0, sigRoot);
         // baseline should almost surely fail because sampled0 likely includes some index > 5
         // if by chance baseline matched (very low probability), keep flipping padding bits until it doesn't
         for (uint256 j = 0; j < 256 && _sampleIsExactlyFirstK(sampled0, 6); j++) {
             bitfield0[0] = baseMeaningful | (uint256(j + 1) << 16);
-            sampled0 = beefy.createFiatShamirFinalBitfield(commitment, bitfield0);
+            sampled0 = beefy.createFiatShamirFinalBitfield(commitment, bitfield0, sigRoot);
         }
         assertTrue(
             !_sampleIsExactlyFirstK(sampled0, 6), "baseline unexpectedly matches attacker set"
@@ -75,6 +80,7 @@ contract FiatShamirPaddingBitsGrindTest is Test {
         beefy.submitFiatShamir(
             commitment,
             bitfield0,
+            sigRoot,
             attackerProofs,
             BeefyClient.MMRLeaf({
                 version: 0,
@@ -90,7 +96,7 @@ contract FiatShamirPaddingBitsGrindTest is Test {
         );
         // exploit: grind ONLY padding bits until sampled set becomes [0..5]
         (uint256 nonce, uint256[] memory grindedBitfield, uint256[] memory sampledGood) =
-            _grindPaddingNonce(commitment, baseMeaningful, 6, 50_000);
+            _grindPaddingNonce(commitment, sigRoot, baseMeaningful, 6, 50_000);
         // verify: meaningful bits (0..15) unchanged
         uint256 meaningMask = (uint256(1) << N) - 1;
         assertEq(
@@ -117,6 +123,7 @@ contract FiatShamirPaddingBitsGrindTest is Test {
         beefy.submitFiatShamir(
             commitment,
             grindedBitfield,
+            sigRoot,
             attackerProofs,
             BeefyClient.MMRLeaf({
                 version: 0,
@@ -135,6 +142,7 @@ contract FiatShamirPaddingBitsGrindTest is Test {
     // Grinding helper
     function _grindPaddingNonce(
         BeefyClient.Commitment memory commitment,
+        bytes32 sigRoot,
         uint256 baseMeaningfulLowBits,
         uint256 k,
         uint256 maxTries
@@ -147,7 +155,7 @@ contract FiatShamirPaddingBitsGrindTest is Test {
         for (uint256 nonce = 0; nonce < maxTries; nonce++) {
             uint256[] memory bf = new uint256[](1);
             bf[0] = baseMeaningfulLowBits | (nonce << N);
-            uint256[] memory s = beefy.createFiatShamirFinalBitfield(commitment, bf);
+            uint256[] memory s = beefy.createFiatShamirFinalBitfield(commitment, bf, sigRoot);
             if (_sampleIsExactlyFirstK(s, k)) {
                 return (nonce, bf, s);
             }
@@ -185,8 +193,29 @@ contract FiatShamirPaddingBitsGrindTest is Test {
                 s: s,
                 index: validatorIndex,
                 account: validators[validatorIndex],
-                proof: merkleProof
+                proof: merkleProof,
+                sigProof: new bytes32[](0) // attached afterward by _attachSigTree
             });
+        }
+    }
+
+    // SNOWBSC-689 fix wiring: commits a sigRoot over exactly `proofs`, then writes each one's
+    // opening back into `proofs[i].sigProof`.
+    function _attachSigTree(BeefyClient.ValidatorProof[] memory proofs)
+        internal
+        pure
+        returns (bytes32 sigRoot)
+    {
+        uint256 n = proofs.length;
+        bytes32[] memory leaves = new bytes32[](n);
+        for (uint256 i = 0; i < n; i++) {
+            leaves[i] =
+                SigTreeLib.sigLeaf(proofs[i].index, proofs[i].v, proofs[i].r, proofs[i].s);
+        }
+        bytes32[][] memory sigProofs;
+        (sigRoot, sigProofs) = SigTreeLib.buildTree(leaves);
+        for (uint256 i = 0; i < n; i++) {
+            proofs[i].sigProof = sigProofs[i];
         }
     }
 

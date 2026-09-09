@@ -281,12 +281,20 @@ contract BeefyClientForgeRejectionTest is Test {
     }
 
     // Builds an aliased proof: claims controlled validator i sits at index X.
+    // sigProof is a placeholder: isValidatorInSet rejects the position mismatch before
+    // verifySignatureOpening (SNOWBSC-689) is ever reached.
     function _answer(uint256 X) internal view returns (BeefyClient.ValidatorProof memory) {
         for (uint256 i = 0; i < CONTROLLED; i++) {
             if (MerkleLibSubstrate.aliases(CTRL[i], X, cProof[i].length, N)) {
                 (uint8 v, bytes32 r, bytes32 s) = vm.sign(cPk[i], ch);
                 return BeefyClient.ValidatorProof({
-                    v: v, r: r, s: s, index: X, account: cAddr[i], proof: cProof[i]
+                    v: v,
+                    r: r,
+                    s: s,
+                    index: X,
+                    account: cAddr[i],
+                    proof: cProof[i],
+                    sigProof: new bytes32[](0)
                 });
             }
         }
@@ -348,11 +356,21 @@ contract BeefyClientForgeRejectionTest is Test {
 
         {
             (uint8 v, bytes32 rr, bytes32 s) = vm.sign(cPk[0], ch);
+            // SNOWBSC-689 fix wiring: a single-leaf tree (root == the leaf, empty opening) is a
+            // valid minimal sigRoot for this one real, non-aliased proof.
+            bytes32 sigRoot = keccak256(bytes.concat(keccak256(abi.encode(CTRL[0], v, rr, s))));
             bc.submitInitial(
                 _commit(),
                 bf,
+                sigRoot,
                 BeefyClient.ValidatorProof({
-                    v: v, r: rr, s: s, index: CTRL[0], account: cAddr[0], proof: cProof[0]
+                    v: v,
+                    r: rr,
+                    s: s,
+                    index: CTRL[0],
+                    account: cAddr[0],
+                    proof: cProof[0],
+                    sigProof: new bytes32[](0)
                 })
             );
         }
@@ -490,9 +508,12 @@ contract FiatShamirForgeRejectionTest is Test {
         }
     }
 
-    function _fsSeed(bytes32 cmh, bytes32 bfh) internal view returns (uint256) {
-        bytes32 inner =
-            sha256(bytes.concat(cmh, bfh, vRoot, bytes32(uint256(SET_ID)), bytes32(uint256(N))));
+    // Mirrors createFiatShamirHash exactly, sigRoot included (SNOWBSC-689 fix), so the
+    // offline-grinded sample below matches what submitFiatShamir actually computes on-chain.
+    function _fsSeed(bytes32 cmh, bytes32 bfh, bytes32 sigRoot) internal view returns (uint256) {
+        bytes32 inner = sha256(
+            bytes.concat(cmh, bfh, sigRoot, vRoot, bytes32(uint256(SET_ID)), bytes32(uint256(N)))
+        );
         return uint256(sha256(bytes.concat(bc.FIAT_SHAMIR_DOMAIN_ID(), inner)));
     }
 
@@ -509,7 +530,13 @@ contract FiatShamirForgeRejectionTest is Test {
             if (MerkleLibSubstrate.aliases(CTRL[i], X, cProof[i].length, N)) {
                 (uint8 v, bytes32 r, bytes32 s) = vm.sign(cPk[i], ch);
                 return BeefyClient.ValidatorProof({
-                    v: v, r: r, s: s, index: X, account: cAddr[i], proof: cProof[i]
+                    v: v,
+                    r: r,
+                    s: s,
+                    index: X,
+                    account: cAddr[i],
+                    proof: cProof[i],
+                    sigProof: new bytes32[](0)
                 });
             }
         }
@@ -568,13 +595,18 @@ contract FiatShamirForgeRejectionTest is Test {
 
         // The attacker's offline grind is UNAFFECTED by the fix: bias blockNumber until the
         // Fiat-Shamir subsample (FS_SIGS) lands entirely in the would-be-answerable set.
+        // sigRoot is a fixed placeholder throughout: verifySignatureOpening is never reached
+        // (isValidatorInSet rejects the aliased proofs first), so its value doesn't matter, only
+        // that the same one is used here and in the actual submitFiatShamir call below, so the
+        // offline-grinded sample matches what the contract computes on-chain.
+        bytes32 sigRoot = bytes32(0);
         uint32 bn;
         uint256 tries;
         uint256[] memory sampled;
         for (bn = 1;; bn++) {
             tries++;
             bytes32 cmh = keccak256(bc.encodeCommitment_public(_commit(bn)));
-            sampled = _sub(_fsSeed(cmh, bfh), bitfield, FS_SIGS);
+            sampled = _sub(_fsSeed(cmh, bfh, sigRoot), bitfield, FS_SIGS);
             bool ok = true;
             for (uint256 j = 0; j < FS_SIGS; j++) {
                 if (!ans[sampled[j]]) {
@@ -599,7 +631,7 @@ contract FiatShamirForgeRejectionTest is Test {
         // FIX: even with a winning grind and a quorum-satisfying bitfield, the aliased proofs are
         // rejected -> the single-tx forge reverts.
         vm.expectRevert(BeefyClient.InvalidValidatorProof.selector);
-        bc.submitFiatShamir(_commit(bn), bitfield, proofs, leaf, empty, 0);
+        bc.submitFiatShamir(_commit(bn), bitfield, sigRoot, proofs, leaf, empty, 0);
 
         assertTrue(bc.latestMMRRoot() != forged, "single-tx FS forge rejected");
         emit log_named_uint("grind found a biasing blockNumber after tries", tries);
