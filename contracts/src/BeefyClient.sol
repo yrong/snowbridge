@@ -132,19 +132,31 @@ contract BeefyClient {
     }
 
     /**
-     * @dev A ticket tracks working state for the interactive submission of new commitments
+     * @dev A ticket tracks working state for the interactive submission of new commitments.
+     *
+     * Each relayer has one ticket, and its storage is reused from one submission to the next.
+     * It is never deleted: a used or expired ticket only has `blockNumber` set to zero. The
+     * slots then stay non-zero, so the next ticket updates them instead of creating them,
+     * which is much cheaper once state creation is repriced. A new ticket must therefore
+     * reset every field a stale value could leak through: `prevRandaoCaptured` guards
+     * `prevRandao`, and `commitmentHash` binds the ticket to its commitment.
      */
     struct Ticket {
-        // The block number this ticket was issued
+        // The block number this ticket was issued. Zero when no ticket is active.
         uint64 blockNumber;
         // Length of the validator set that signed the commitment
         uint32 validatorSetLen;
         // The number of signatures required
         uint32 numRequiredSignatures;
+        // Whether `prevRandao` was captured for this ticket. Until then, `prevRandao` may
+        // still hold the seed of the relayer's previous ticket and must not be used.
+        bool prevRandaoCaptured;
         // The PREVRANDAO seed selected for this ticket session
         uint256 prevRandao;
         // Hash of a bitfield claiming which validators have signed
         bytes32 bitfieldHash;
+        // Hash of the commitment this ticket is for
+        bytes32 commitmentHash;
     }
 
     /// @dev The MMRLeaf describes the leaf structure of the MMR
@@ -205,8 +217,8 @@ contract BeefyClient {
     /// @dev State of the next validator set
     ValidatorSetState public nextValidatorSet;
 
-    /// @dev Pending tickets for commitment submission
-    mapping(bytes32 ticketID => Ticket) public tickets;
+    /// @dev The ticket of each relayer. At most one is active per relayer.
+    mapping(address relayer => Ticket) public tickets;
 
     /* Constants */
 
@@ -359,17 +371,19 @@ contract BeefyClient {
         // This ensures the bitfield was created by createInitialBitfield or equivalent
         Bitfield.validatePadding(bitfield, vset.length);
 
-        tickets[createTicketID(msg.sender, commitmentHash)] = Ticket({
-            blockNumber: uint64(block.number),
-            validatorSetLen: uint32(vset.length),
-            numRequiredSignatures: uint32(
-                computeNumRequiredSignatures(
-                    vset.length, signatureUsageCount, minNumRequiredSignatures
-                )
-            ),
-            prevRandao: 0,
-            bitfieldHash: keccak256(abi.encodePacked(bitfield))
-        });
+        // Replaces any ticket this relayer already has. `prevRandao` is left as it is and
+        // marked as not captured, so it is overwritten rather than cleared and recreated.
+        Ticket storage ticket = tickets[msg.sender];
+        ticket.blockNumber = uint64(block.number);
+        ticket.validatorSetLen = uint32(vset.length);
+        ticket.numRequiredSignatures = uint32(
+            computeNumRequiredSignatures(
+                vset.length, signatureUsageCount, minNumRequiredSignatures
+            )
+        );
+        ticket.prevRandaoCaptured = false;
+        ticket.bitfieldHash = keccak256(abi.encodePacked(bitfield));
+        ticket.commitmentHash = commitmentHash;
 
         emit NewTicket(msg.sender, commitment.blockNumber);
     }
@@ -379,14 +393,9 @@ contract BeefyClient {
      * @param commitmentHash contains the commitmentHash signed by the validators
      */
     function commitPrevRandao(bytes32 commitmentHash) external {
-        bytes32 ticketID = createTicketID(msg.sender, commitmentHash);
-        Ticket storage ticket = tickets[ticketID];
+        Ticket storage ticket = activeTicket(commitmentHash);
 
-        if (ticket.blockNumber == 0) {
-            revert InvalidTicket();
-        }
-
-        if (ticket.prevRandao != 0) {
+        if (ticket.prevRandaoCaptured) {
             revert PrevRandaoAlreadyCaptured();
         }
 
@@ -397,13 +406,14 @@ contract BeefyClient {
 
         // relayer can capture within `randaoCommitExpiration` blocks
         if (block.number > ticket.blockNumber + randaoCommitDelay + randaoCommitExpiration) {
-            delete tickets[ticketID];
+            ticket.blockNumber = 0;
             emit TicketExpired();
             return;
         }
 
         // Post-merge, the difficulty opcode now returns PREVRANDAO
         ticket.prevRandao = block.prevrandao;
+        ticket.prevRandaoCaptured = true;
     }
 
     /**
@@ -425,8 +435,7 @@ contract BeefyClient {
         uint256 leafProofOrder
     ) external {
         bytes32 commitmentHash = keccak256(encodeCommitment(commitment));
-        bytes32 ticketID = createTicketID(msg.sender, commitmentHash);
-        validateTicket(ticketID, commitment, bitfield);
+        Ticket storage ticket = validateTicket(commitmentHash, commitment, bitfield);
 
         bool is_next_session = false;
         ValidatorSetState storage vset = currentValidatorSet;
@@ -441,7 +450,7 @@ contract BeefyClient {
         // This ensures the bitfield was created by createInitialBitfield or equivalent
         Bitfield.validatePadding(bitfield, vset.length);
 
-        verifyCommitment(commitmentHash, ticketID, bitfield, vset, proofs);
+        verifyCommitment(commitmentHash, ticket, bitfield, vset, proofs);
 
         bytes32 newMMRRoot = ensureProvidesMMRRoot(commitment);
 
@@ -466,7 +475,9 @@ contract BeefyClient {
 
         latestMMRRoot = newMMRRoot;
         latestBeefyBlock = commitment.blockNumber;
-        delete tickets[ticketID];
+        // Close the ticket but keep its slots non-zero for the relayer's next ticket.
+        ticket.blockNumber = 0;
+        ticket.prevRandaoCaptured = false;
 
         emit NewMMRRoot(newMMRRoot, commitment.blockNumber);
     }
@@ -519,7 +530,10 @@ contract BeefyClient {
         view
         returns (uint256[] memory)
     {
-        Ticket storage ticket = tickets[createTicketID(msg.sender, commitmentHash)];
+        Ticket storage ticket = activeTicket(commitmentHash);
+        if (!ticket.prevRandaoCaptured) {
+            revert PrevRandaoNotCaptured();
+        }
         if (ticket.bitfieldHash != keccak256(abi.encodePacked(bitfield))) {
             revert InvalidBitfield();
         }
@@ -629,16 +643,13 @@ contract BeefyClient {
 
     /* Internal Functions */
 
-    // Creates a unique ticket ID for a new interactive prover-verifier session
-    function createTicketID(address account, bytes32 commitmentHash)
-        internal
-        pure
-        returns (bytes32 value)
-    {
-        assembly {
-            mstore(0x00, account)
-            mstore(0x20, commitmentHash)
-            value := keccak256(0x0, 0x40)
+    /**
+     * @dev The caller's ticket, which must be active and for `commitmentHash`.
+     */
+    function activeTicket(bytes32 commitmentHash) internal view returns (Ticket storage ticket) {
+        ticket = tickets[msg.sender];
+        if (ticket.blockNumber == 0 || ticket.commitmentHash != commitmentHash) {
+            revert InvalidTicket();
         }
     }
 
@@ -687,12 +698,11 @@ contract BeefyClient {
      */
     function verifyCommitment(
         bytes32 commitmentHash,
-        bytes32 ticketID,
+        Ticket storage ticket,
         uint256[] calldata bitfield,
         ValidatorSetState storage vset,
         CompactValidatorProofs calldata proofs
     ) internal view {
-        Ticket storage ticket = tickets[ticketID];
         uint256 numRequiredSignatures = ticket.numRequiredSignatures;
 
         // Generate final bitfield indicating which validators need to be included in the proofs.
@@ -917,18 +927,14 @@ contract BeefyClient {
      * @dev Basic validation of a ticket for submitFinal
      */
     function validateTicket(
-        bytes32 ticketID,
+        bytes32 commitmentHash,
         Commitment calldata commitment,
         uint256[] calldata bitfield
-    ) internal view {
-        Ticket storage ticket = tickets[ticketID];
+    ) internal view returns (Ticket storage ticket) {
+        // Reverts unless submitInitial opened a ticket for this commitment
+        ticket = activeTicket(commitmentHash);
 
-        if (ticket.blockNumber == 0) {
-            // submitInitial hasn't been called yet
-            revert InvalidTicket();
-        }
-
-        if (ticket.prevRandao == 0) {
+        if (!ticket.prevRandaoCaptured) {
             // commitPrevRandao hasn't been called yet
             revert PrevRandaoNotCaptured();
         }

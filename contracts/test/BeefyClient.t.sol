@@ -213,6 +213,86 @@ contract BeefyClientTest is Test {
         return commitment;
     }
 
+    /// Same as the happy path, but the relayer's ticket storage is already non-zero from an
+    /// earlier submission, as it is in steady state.
+    function testSubmitHappyPathReusedTicket() public {
+        BeefyClient.Commitment memory commitment = initialize(setId);
+        beefyClient.seedClosedTicket();
+
+        beefyClient.submitInitial(commitment, bitfield, finalValidatorProofs[0]);
+        vm.roll(block.number + randaoCommitDelay);
+        commitPrevRandao();
+        createFinalProofs();
+        beefyClient.submitFinal(
+            commitment,
+            bitfield,
+            CompactProofLib.toCompact(finalValidatorProofs, setSize),
+            emptyLeaf,
+            emptyLeafProofs,
+            emptyLeafProofOrder
+        );
+        assertEq(beefyClient.latestBeefyBlock(), blockNumber);
+    }
+
+    function testClosedTicketCannotBeReused() public {
+        BeefyClient.Commitment memory commitment = testSubmitHappyPath();
+
+        BeefyClient.Ticket memory ticket = beefyClient.getTicket(commitHash);
+        assertEq(ticket.blockNumber, 0);
+        assertFalse(ticket.prevRandaoCaptured);
+
+        vm.expectRevert(BeefyClient.InvalidTicket.selector);
+        beefyClient.submitFinal(
+            commitment,
+            bitfield,
+            CompactProofLib.toCompact(finalValidatorProofs, setSize),
+            emptyLeaf,
+            emptyLeafProofs,
+            emptyLeafProofOrder
+        );
+        vm.expectRevert(BeefyClient.InvalidTicket.selector);
+        commitPrevRandao();
+    }
+
+    /// A new ticket must not inherit the previous ticket's seed, even though the slot keeps it.
+    function testNewTicketDoesNotReusePreviousPrevRandao() public {
+        BeefyClient.Commitment memory commitment = initialize(setId);
+        beefyClient.submitInitial(commitment, bitfield, finalValidatorProofs[0]);
+        vm.roll(block.number + randaoCommitDelay);
+        commitPrevRandao();
+
+        // Open a new ticket over the old one. The old seed is still in storage.
+        beefyClient.submitInitial(commitment, bitfield, finalValidatorProofs[0]);
+        BeefyClient.Ticket memory ticket = beefyClient.getTicket(commitHash);
+        assertEq(ticket.prevRandao, prevRandao);
+        assertFalse(ticket.prevRandaoCaptured);
+
+        vm.expectRevert(BeefyClient.PrevRandaoNotCaptured.selector);
+        beefyClient.createFinalBitfield(commitHash, bitfield);
+
+        vm.expectRevert(BeefyClient.PrevRandaoNotCaptured.selector);
+        beefyClient.submitFinal(
+            commitment,
+            bitfield,
+            CompactProofLib.toCompact(finalValidatorProofs, setSize),
+            emptyLeaf,
+            emptyLeafProofs,
+            emptyLeafProofOrder
+        );
+    }
+
+    function testTicketIsBoundToItsCommitment() public {
+        BeefyClient.Commitment memory commitment = initialize(setId);
+        beefyClient.submitInitial(commitment, bitfield, finalValidatorProofs[0]);
+        vm.roll(block.number + randaoCommitDelay);
+
+        vm.expectRevert(BeefyClient.InvalidTicket.selector);
+        beefyClient.commitPrevRandao(keccak256("another commitment"));
+
+        vm.expectRevert(BeefyClient.InvalidTicket.selector);
+        beefyClient.createFinalBitfield(keccak256("another commitment"), bitfield);
+    }
+
     function testSubmitWithOldBlockFailsWithStaleCommitment() public {
         BeefyClient.Commitment memory commitment = initialize(setId);
         beefyClient.setLatestBeefyBlock(commitment.blockNumber + 1);
@@ -407,13 +487,16 @@ contract BeefyClientTest is Test {
         vm.expectRevert(BeefyClient.WaitPeriodNotOver.selector);
         commitPrevRandao();
 
-        // ticket deleted if PrevRandao commit is submitted too late
+        // ticket closed if PrevRandao commit is submitted too late
         vm.roll(block.number + randaoCommitDelay + randaoCommitExpiration + 1);
         commitPrevRandao();
         BeefyClient.Ticket memory ticket = beefyClient.getTicket(commitHash);
-        assertEq(ticket.prevRandao, 0);
         assertEq(ticket.blockNumber, 0);
-        assertEq(ticket.bitfieldHash, bytes32(0));
+        assertFalse(ticket.prevRandaoCaptured);
+
+        // a closed ticket cannot be used any more
+        vm.expectRevert(BeefyClient.InvalidTicket.selector);
+        commitPrevRandao();
     }
 
     function testSubmitFailForPrevRandaoCapturedMoreThanOnce() public {
