@@ -29,6 +29,25 @@ contract BeefyClientWarmGasTest is BeefyClientTest {
         );
     }
 
+    /// Same as `testWarmInteractive`, but the relayer's ticket slots are already non-zero from
+    /// an earlier submission, which is the steady state with reusable tickets.
+    function testWarmInteractiveReusedTicket() public {
+        BeefyClient.Commitment memory commitment = warm();
+        beefyClient.seedClosedTicket();
+        beefyClient.submitInitial(commitment, bitfield, finalValidatorProofs[0]);
+        vm.roll(block.number + randaoCommitDelay);
+        commitPrevRandao();
+        createFinalProofs();
+        beefyClient.submitFinal(
+            commitment,
+            bitfield,
+            CompactProofLib.toCompact(finalValidatorProofs, setSize),
+            emptyLeaf,
+            emptyLeafProofs,
+            emptyLeafProofOrder
+        );
+    }
+
     function testWarmFiatShamir() public {
         BeefyClient.Commitment memory commitment = warm();
         beefyClient.submitFiatShamir(
