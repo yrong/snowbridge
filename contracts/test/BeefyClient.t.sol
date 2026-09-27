@@ -318,6 +318,40 @@ contract BeefyClientTest is Test {
         beefyClient.commitPrevRandao(commitHash);
     }
 
+    /// Reopening a ticket restarts the RANDAO delay: time already waited on the old claim does
+    /// not carry over to the new one.
+    function testReopenedTicketRestartsDelay() public {
+        BeefyClient.Commitment memory commitment = initialize(setId);
+        beefyClient.submitInitial(commitment, bitfield, finalValidatorProofs[0]);
+        vm.roll(block.number + randaoCommitDelay);
+
+        beefyClient.submitInitial(commitment, bitfield, finalValidatorProofs[0]);
+        vm.expectRevert(BeefyClient.WaitPeriodNotOver.selector);
+        commitPrevRandao();
+    }
+
+    /// `commitPrevRandao` ignores its argument and captures for the caller's open ticket. The
+    /// seed is still only usable with that ticket's own commitment and bitfield.
+    function testCommitPrevRandaoIgnoresItsArgument() public {
+        BeefyClient.Commitment memory commitment = initialize(setId);
+        beefyClient.submitInitial(commitment, bitfield, finalValidatorProofs[0]);
+        vm.roll(block.number + randaoCommitDelay);
+        vm.prevrandao(bytes32(uint256(prevRandao)));
+        beefyClient.commitPrevRandao(keccak256("unrelated commitment"));
+        assertEq(beefyClient.getTicket(commitHash).seed, prevRandao);
+
+        createFinalProofs();
+        beefyClient.submitFinal(
+            commitment,
+            bitfield,
+            CompactProofLib.toCompact(finalValidatorProofs, setSize),
+            emptyLeaf,
+            emptyLeafProofs,
+            emptyLeafProofOrder
+        );
+        assertEq(beefyClient.latestBeefyBlock(), blockNumber);
+    }
+
     function testSubmitWithOldBlockFailsWithStaleCommitment() public {
         BeefyClient.Commitment memory commitment = initialize(setId);
         beefyClient.setLatestBeefyBlock(commitment.blockNumber + 1);
