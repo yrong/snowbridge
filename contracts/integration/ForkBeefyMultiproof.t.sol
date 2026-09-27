@@ -1,17 +1,21 @@
 // SPDX-License-Identifier: Apache-2.0
 pragma solidity 0.8.34;
 
-// Fork-mainnet replay of real BEEFY submissions (see `MainnetBeefyFixture`) through the
-// multiproof BeefyClient. For each, fork one block before the tx, write the local BeefyClient
-// over the live code (keeping its storage: the ticket, the validator sets), re-encode the
-// proofs as a multiproof and replay the call from the original relayer. For `submitFinal`, the
-// live ticket is first copied into the per-relayer ticket layout. It must succeed and
-// advance the MMR root.
+// Fork-mainnet checks of real BEEFY submissions (see `MainnetBeefyFixture`) against the local
+// BeefyClient. For each, fork one block before the tx and write the local BeefyClient over the
+// live code (keeping its storage: the ticket, the validator sets).
+//
+// - `submitFiatShamir` is replayed from the original relayer with the proofs re-encoded as a
+//   multiproof. It must succeed and advance the MMR root.
+// - For `submitFinal`, the live ticket is copied into the per-relayer two-slot layout and must
+//   sample from the claimed bitfield (see `_checkMigratedTicketSamples` for why the historical
+//   proofs are not replayed here).
 //
 // Run (needs an archive RPC; a public default is used if MAINNET_RPC_URL is unset):
 //   FOUNDRY_PROFILE=integration forge test --match-contract ForkBeefyMultiproof -vv
 
 import {BeefyClient} from "../src/BeefyClient.sol";
+import {Bitfield} from "../src/utils/Bitfield.sol";
 import {CompactProofLib} from "../test/utils/CompactProofLib.sol";
 import {MainnetBeefyFixture} from "../test/MainnetSubmitFinalMultiproof.t.sol";
 
@@ -19,19 +23,19 @@ contract ForkBeefyMultiproofTest is MainnetBeefyFixture {
     /// Storage slot of `BeefyClient.tickets`, the same in the mainnet and the local layout.
     uint256 constant TICKETS_SLOT = 10;
 
-    function testMainnetSubmitFinalSucceedsAfterMultiproofEtch() public {
-        _replay(finalE8eb06());
+    function testMainnetTicketE8eb06MigratesAndSamples() public {
+        _checkTicket(finalE8eb06());
     }
 
-    function testMainnetSubmitFinal992ebbSucceedsAfterMultiproofEtch() public {
-        _replay(final992ebb());
+    function testMainnetTicket992ebbMigratesAndSamples() public {
+        _checkTicket(final992ebb());
     }
 
     function testMainnetSubmitFiatShamirSucceedsAfterMultiproofEtch() public {
         _replay(fiatShamir0a9f5a());
     }
 
-    function _replay(MainnetTx memory t) internal {
+    function _fork(MainnetTx memory t) internal {
         // Default is a public archive endpoint; override with MAINNET_RPC_URL.
         string memory rpc = vm.envOr("MAINNET_RPC_URL", string("https://eth.drpc.org"));
         vm.createSelectFork(rpc, t.blockNumber - 1);
@@ -41,15 +45,28 @@ contract ForkBeefyMultiproofTest is MainnetBeefyFixture {
         assertEq(id, t.vsetId, "set id");
         assertEq(len, t.vsetLength, "set length");
         assertEq(root, t.vsetRoot, "set root");
+    }
 
+    function _checkTicket(MainnetTx memory t) internal {
+        _fork(t);
+        BeefyClient.Commitment memory commitment;
+        uint256[] memory bitfield;
+        (commitment, bitfield,,,,) = _load(t);
+
+        _etchMultiproof();
+        bytes32 commitmentHash = BeefyClient(BC).computeCommitmentHash(commitment);
+        _migrateTicket(commitmentHash);
+        vm.roll(t.blockNumber);
+        _checkMigratedTicketSamples(commitmentHash, bitfield);
+    }
+
+    function _replay(MainnetTx memory t) internal {
+        _fork(t);
         (bytes memory multiproofCd, BeefyClient.Commitment memory commitment) =
             _multiproofCalldata(t);
 
         bytes32 mmrBefore = BeefyClient(BC).latestMMRRoot();
         _etchMultiproof();
-        if (!t.fiatShamir) {
-            _migrateTicket(BeefyClient(BC).computeCommitmentHash(commitment));
-        }
         vm.roll(t.blockNumber);
         vm.prank(RELAYER);
         (bool ok, bytes memory ret) = BC.call(multiproofCd);
@@ -85,8 +102,8 @@ contract ForkBeefyMultiproofTest is MainnetBeefyFixture {
     }
 
     /// Mainnet stores the relayer's ticket under `keccak(relayer, commitmentHash)` with three
-    /// fields. This branch keys it by relayer and adds `prevRandaoCaptured` and
-    /// `commitmentHash`. Copy the live ticket into the new layout so `submitFinal` can find it.
+    /// fields. This branch keys it by relayer and packs it into two slots. Copy the live ticket
+    /// into the new layout.
     function _migrateTicket(bytes32 commitmentHash) internal {
         bytes32 ticketID = keccak256(abi.encode(RELAYER, commitmentHash));
         uint256 oldBase = uint256(keccak256(abi.encode(ticketID, TICKETS_SLOT)));
@@ -98,20 +115,36 @@ contract ForkBeefyMultiproofTest is MainnetBeefyFixture {
         assertTrue(packed != 0, "no live ticket for the relayer");
         assertTrue(prevRandao != 0, "live ticket has no captured PREVRANDAO");
 
-        // `prevRandaoCaptured` is packed at byte 16 of the first slot.
-        vm.store(BC, bytes32(newBase), packed | bytes32(uint256(1) << 128));
-        vm.store(BC, bytes32(newBase + 1), prevRandao);
-        vm.store(BC, bytes32(newBase + 2), bitfieldHash);
-        vm.store(BC, bytes32(newBase + 3), commitmentHash);
+        // Slot 0 keeps blockNumber / validatorSetLen / numRequiredSignatures in its low 128 bits
+        // and takes the 120-bit seed above them. Slot 1 is the claim hash.
+        uint256 seed = uint256(uint120(uint256(prevRandao)));
+        if (seed == 0) {
+            seed = 1;
+        }
+        bytes32 claim = keccak256(abi.encode(commitmentHash, bitfieldHash));
+        vm.store(BC, bytes32(newBase), bytes32(uint256(packed) | (seed << 128)));
+        vm.store(BC, bytes32(newBase + 1), claim);
 
-        // Read back through the getter to confirm the slot arithmetic.
-        (uint64 blockNumber,,, bool captured, uint256 seed, bytes32 bfHash, bytes32 cHash) =
+        (uint64 blockNumber,,, uint120 stored, bytes32 storedClaim) =
             BeefyClient(BC).tickets(RELAYER);
         assertTrue(blockNumber != 0, "ticket block number");
-        assertTrue(captured, "ticket captured flag");
-        assertEq(seed, uint256(prevRandao), "ticket prevRandao");
-        assertEq(bfHash, bitfieldHash, "ticket bitfield hash");
-        assertEq(cHash, commitmentHash, "ticket commitment hash");
+        assertEq(stored, seed, "ticket seed");
+        assertEq(storedClaim, claim, "ticket claim");
+    }
+
+    /// The migrated ticket is open, captured and bound to this commitment and bitfield:
+    /// `createFinalBitfield` accepts it and samples `numRequiredSignatures` validators from the
+    /// claimed bitfield. The historical `submitFinal` proofs cannot be replayed: they answer the
+    /// sample drawn from the full 256-bit PREVRANDAO, while this client samples from its low
+    /// 120 bits. The multiproof itself is replayed on real data in #1813.
+    function _checkMigratedTicketSamples(bytes32 commitmentHash, uint256[] memory bf) internal {
+        (,, uint32 required,,) = BeefyClient(BC).tickets(RELAYER);
+        vm.prank(RELAYER);
+        uint256[] memory sample = BeefyClient(BC).createFinalBitfield(commitmentHash, bf);
+        assertEq(Bitfield.countSetBits(sample), required, "sample size");
+        for (uint256 w = 0; w < sample.length; w++) {
+            assertEq(sample[w] & ~bf[w], 0, "sample outside the claimed bitfield");
+        }
     }
 
     function _etchMultiproof() internal {

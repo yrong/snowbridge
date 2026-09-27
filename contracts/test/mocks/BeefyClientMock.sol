@@ -112,14 +112,13 @@ contract BeefyClientMock is BeefyClient {
     /// @dev Leave the caller with a closed ticket whose slots are all non-zero, as after an
     /// earlier submission. Used to measure the cost of reusing ticket storage.
     function seedClosedTicket() external {
-        Ticket storage ticket = tickets[msg.sender];
-        ticket.blockNumber = 0;
-        ticket.validatorSetLen = 1;
-        ticket.numRequiredSignatures = 1;
-        ticket.prevRandaoCaptured = false;
-        ticket.prevRandao = 1;
-        ticket.bitfieldHash = bytes32(uint256(1));
-        ticket.commitmentHash = bytes32(uint256(1));
+        tickets[msg.sender] = Ticket({
+            blockNumber: 0,
+            validatorSetLen: 1,
+            numRequiredSignatures: 1,
+            seed: 1,
+            claimHash: bytes32(uint256(1))
+        });
     }
 
     function getTicket(bytes32) public view returns (Ticket memory) {
