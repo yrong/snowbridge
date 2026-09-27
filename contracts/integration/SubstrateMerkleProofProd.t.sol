@@ -13,7 +13,7 @@ pragma solidity 0.8.34;
 //   2. REPLAY (contract layer): etch the current BeefyClient over live storage. `submitInitial`
 //      still takes a single `ValidatorProof` and is replayed as-is. `submitFinal` now takes
 //      `CompactValidatorProofs`; the captured legacy `ValidatorProof[]` is reassembled into that
-//      multiproof format and then submitted.
+//      multiproof format. The live ticket is copied into the per-relayer layout first.
 //
 //   BeefyClient 0x7cfc5C8b341991993080Af67D940B6aD19a010E1; all pairs from relayer 0xBa9b...Ed49.
 //
@@ -82,6 +82,8 @@ contract SubstrateMerkleProofProdTest is Test {
     string constant RPC = "https://eth-mainnet.public.blastapi.io"; // archive
     address constant BC = 0x7cfc5C8b341991993080Af67D940B6aD19a010E1;
     address constant RELAYER = 0xBa9bC9a8Aa87872f7B990031bde984A00b9CEd49;
+    /// Storage slot of `BeefyClient.tickets`. The mapping slot is unchanged; the key and value are not.
+    uint256 constant TICKETS_SLOT = 10;
 
     NewVerifyHarness newH;
 
@@ -197,6 +199,34 @@ contract SubstrateMerkleProofProdTest is Test {
 
     // Replace the live contract's code with a freshly-compiled PATCHED BeefyClient that carries the
     // same immutables (read from the live contract), preserving the live storage layout/state.
+    /// Mainnet stores the relayer's ticket under `keccak(relayer, commitmentHash)` with three
+    /// fields. This branch keys it by relayer and adds `prevRandaoCaptured` and `commitmentHash`.
+    function _migrateTicket(bytes32 commitmentHash) internal {
+        bytes32 ticketID = keccak256(abi.encode(RELAYER, commitmentHash));
+        uint256 oldBase = uint256(keccak256(abi.encode(ticketID, TICKETS_SLOT)));
+        uint256 newBase = uint256(keccak256(abi.encode(RELAYER, TICKETS_SLOT)));
+
+        bytes32 packed = vm.load(BC, bytes32(oldBase));
+        bytes32 prevRandao = vm.load(BC, bytes32(oldBase + 1));
+        bytes32 bitfieldHash = vm.load(BC, bytes32(oldBase + 2));
+        assertTrue(packed != 0, "no live ticket for the relayer");
+        assertTrue(prevRandao != 0, "live ticket has no captured PREVRANDAO");
+
+        // `prevRandaoCaptured` is packed at byte 16 of the first slot.
+        vm.store(BC, bytes32(newBase), packed | bytes32(uint256(1) << 128));
+        vm.store(BC, bytes32(newBase + 1), prevRandao);
+        vm.store(BC, bytes32(newBase + 2), bitfieldHash);
+        vm.store(BC, bytes32(newBase + 3), commitmentHash);
+
+        (uint64 blockNumber,,, bool captured, uint256 seed, bytes32 bfHash, bytes32 cHash) =
+            BeefyClient(BC).tickets(RELAYER);
+        assertTrue(blockNumber != 0, "ticket block number");
+        assertTrue(captured, "ticket captured flag");
+        assertEq(seed, uint256(prevRandao), "ticket prevRandao");
+        assertEq(bfHash, bitfieldHash, "ticket bitfield hash");
+        assertEq(cHash, commitmentHash, "ticket commitment hash");
+    }
+
     function _etchPatched() internal {
         BeefyClient live = BeefyClient(BC);
         uint256 delay = live.randaoCommitDelay();
@@ -293,6 +323,8 @@ contract SubstrateMerkleProofProdTest is Test {
         );
 
         _etchPatched();
+        // The fork holds the ticket under keccak(relayer, commitmentHash). Copy it to tickets[relayer].
+        _migrateTicket(BeefyClient(BC).computeCommitmentHash(c));
         vm.roll(p.finalBlock);
         bytes32 rootBefore = BeefyClient(BC).latestMMRRoot();
         vm.prank(RELAYER);
