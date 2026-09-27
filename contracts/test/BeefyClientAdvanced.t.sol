@@ -92,7 +92,7 @@ contract BeefyClientAdvancedTest is Test {
 
         vm.startPrank(honestRelayer1);
         beefyClient.submitInitial(commitment, bitfield, vproof);
-        (,, uint32 nRequiredBefore,,,,) = beefyClient.tickets(honestRelayer1);
+        (,, uint32 nRequiredBefore,,) = beefyClient.tickets(honestRelayer1);
         vm.stopPrank();
 
         vm.startPrank(attacker);
@@ -106,7 +106,7 @@ contract BeefyClientAdvancedTest is Test {
         // -------------------------
         vm.startPrank(honestRelayer2);
         beefyClient.submitInitial(commitment, bitfield, vproof);
-        (,, uint32 nRequiredAfter,,,,) = beefyClient.tickets(honestRelayer2);
+        (,, uint32 nRequiredAfter,,) = beefyClient.tickets(honestRelayer2);
         vm.stopPrank();
         // assert protocol-wide grief: ΔN >= 24 and never exceeds quorum
         assertGt(nRequiredAfter, nRequiredBefore, "N did not increase");
