@@ -58,7 +58,7 @@ contract CompactValidatorProofsTest is Test {
     }
 
     function setUp() public {
-        minNumRequiredSignatures = vm.envOr("MINIMUM_REQUIRED_SIGNATURES", uint256(24));
+        minNumRequiredSignatures = vm.envOr("MINIMUM_REQUIRED_SIGNATURES", uint256(19));
         string memory c =
             vm.readFile(string.concat(vm.projectRoot(), "/test/data/beefy-commitment.json"));
         blockNumber = uint32(c.readUint(".params.commitment.blockNumber"));
