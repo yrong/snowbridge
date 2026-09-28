@@ -17,7 +17,7 @@ export ETHERSCAN_API_KEY=your-etherscan-api-key-here
 
 ## BeefyClient
 export RANDAO_COMMIT_DELAY=128
-export RANDAO_COMMIT_EXP=24
+export RANDAO_COMMIT_EXP=8
 export MINIMUM_REQUIRED_SIGNATURES=17
 export ValidatorSetSize=600
 
