@@ -807,6 +807,18 @@ contract BeefyClientTest is Test {
         assertEq(1, result, "C");
     }
 
+    /// The usage count includes the current claim (spec: count starts at 1), so only the first
+    /// use costs the base number; each doubling of uses adds 2 signatures.
+    function testUsageCountIncludesCurrentClaim() public view {
+        // Previous uses 0..4 of one validator's signature, validator set 600, minimum 17.
+        uint256[5] memory expected = [uint256(28), 30, 32, 32, 34];
+        for (uint256 used = 0; used < expected.length; used++) {
+            assertEq(
+                beefyClient.computeNumRequiredSignatures_public(600, used, 17), expected[used]
+            );
+        }
+    }
+
     function testStorageToStorageCopies() public {
         beefyClient.copyCounters();
     }
