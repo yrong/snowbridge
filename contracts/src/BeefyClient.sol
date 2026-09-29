@@ -5,7 +5,7 @@ pragma solidity 0.8.34;
 import {ECDSA} from "openzeppelin/utils/cryptography/ECDSA.sol";
 import {SubstrateMerkleProof} from "./utils/SubstrateMerkleProof.sol";
 import {Bitfield} from "./utils/Bitfield.sol";
-import {Uint16Array, createUint16Array} from "./utils/Uint16Array.sol";
+import {Uint16Array} from "./utils/Uint16Array.sol";
 import {Math} from "./utils/Math.sol";
 import {MMRProof} from "./utils/MMRProof.sol";
 import {ScaleCodec} from "./utils/ScaleCodec.sol";
@@ -191,7 +191,7 @@ contract BeefyClient {
     }
 
     /**
-     * @dev The ValidatorSetState describes a BEEFY validator set along with signature usage counters
+     * @dev The ValidatorSetState describes a BEEFY validator set
      */
     struct ValidatorSetState {
         // Identifier for the set
@@ -200,8 +200,6 @@ contract BeefyClient {
         uint128 length;
         // Merkle root of BEEFY validator addresses
         bytes32 root;
-        // Number of times a validator signature has been used
-        Uint16Array usageCounters;
     }
 
     /* State */
@@ -220,6 +218,11 @@ contract BeefyClient {
 
     /// @dev The ticket of each relayer. At most one is active per relayer.
     mapping(address relayer => Ticket) public tickets;
+
+    /// @dev Number of times a validator signature has been used, keyed by validator set root.
+    /// Sets with the same membership share counters, which only raises the counts. A handover
+    /// needs no copy and no zeroing.
+    mapping(bytes32 root => Uint16Array) internal usageCounters;
 
     /* Constants */
 
@@ -306,11 +309,9 @@ contract BeefyClient {
         currentValidatorSet.id = _initialValidatorSet.id;
         currentValidatorSet.length = _initialValidatorSet.length;
         currentValidatorSet.root = _initialValidatorSet.root;
-        currentValidatorSet.usageCounters = createUint16Array(currentValidatorSet.length);
         nextValidatorSet.id = _nextValidatorSet.id;
         nextValidatorSet.length = _nextValidatorSet.length;
         nextValidatorSet.root = _nextValidatorSet.root;
-        nextValidatorSet.usageCounters = createUint16Array(nextValidatorSet.length);
     }
 
     /* External Functions */
@@ -330,15 +331,20 @@ contract BeefyClient {
             revert StaleCommitment();
         }
 
+        // `proof.index` is not bounded here. An index at or past `vset.length` fails
+        // `isValidatorInSet` below, which reverts the counter update with it.
         ValidatorSetState storage vset = currentValidatorSet;
         uint16 signatureUsageCount;
         if (commitment.validatorSetID == currentValidatorSet.id) {
-            signatureUsageCount = currentValidatorSet.usageCounters.get(proof.index);
-            currentValidatorSet.usageCounters
-                .set(proof.index, signatureUsageCount.saturatingAdd(1));
+            signatureUsageCount = usageCounters[currentValidatorSet.root].get(proof.index);
+            usageCounters[currentValidatorSet.root].set(
+                proof.index, signatureUsageCount.saturatingAdd(1)
+            );
         } else if (commitment.validatorSetID == nextValidatorSet.id) {
-            signatureUsageCount = nextValidatorSet.usageCounters.get(proof.index);
-            nextValidatorSet.usageCounters.set(proof.index, signatureUsageCount.saturatingAdd(1));
+            signatureUsageCount = usageCounters[nextValidatorSet.root].get(proof.index);
+            usageCounters[nextValidatorSet.root].set(
+                proof.index, signatureUsageCount.saturatingAdd(1)
+            );
             vset = nextValidatorSet;
         } else {
             revert InvalidCommitment();
@@ -478,7 +484,6 @@ contract BeefyClient {
             nextValidatorSet.id = leaf.nextAuthoritySetID;
             nextValidatorSet.length = leaf.nextAuthoritySetLen;
             nextValidatorSet.root = leaf.nextAuthoritySetRoot;
-            nextValidatorSet.usageCounters = createUint16Array(leaf.nextAuthoritySetLen);
         }
 
         latestMMRRoot = newMMRRoot;
@@ -637,7 +642,6 @@ contract BeefyClient {
             nextValidatorSet.id = leaf.nextAuthoritySetID;
             nextValidatorSet.length = leaf.nextAuthoritySetLen;
             nextValidatorSet.root = leaf.nextAuthoritySetRoot;
-            nextValidatorSet.usageCounters = createUint16Array(leaf.nextAuthoritySetLen);
         }
 
         latestMMRRoot = newMMRRoot;

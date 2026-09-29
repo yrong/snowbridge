@@ -9,7 +9,7 @@ import {CompactProofLib} from "../test/utils/CompactProofLib.sol";
 contract SubstrateMerkleProofAliasingForkTest is BeefyClientForgeRejectionTest {
     function test_fix_forgeRejectedAtLiveValidatorCount() public {
         vm.createSelectFork("https://ethereum-rpc.publicnode.com");
-        (uint128 id, uint128 len,,) = BeefyClient(LIVE).currentValidatorSet();
+        (uint128 id, uint128 len,) = BeefyClient(LIVE).currentValidatorSet();
         assertEq(len, N, "live validator count read from mainnet is 600");
 
         (BeefyClientMock bc, uint256[] memory bf, BeefyClient.ValidatorProof[] memory proofs) =

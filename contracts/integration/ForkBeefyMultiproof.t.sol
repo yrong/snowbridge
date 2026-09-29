@@ -20,8 +20,9 @@ import {CompactProofLib} from "../test/utils/CompactProofLib.sol";
 import {MainnetBeefyFixture} from "../test/MainnetSubmitFinalMultiproof.t.sol";
 
 contract ForkBeefyMultiproofTest is MainnetBeefyFixture {
-    /// Storage slot of `BeefyClient.tickets`, the same in the mainnet and the local layout.
-    uint256 constant TICKETS_SLOT = 10;
+    /// Storage slot of `BeefyClient.tickets` on mainnet and in the local layout.
+    uint256 constant LIVE_TICKETS_SLOT = 10;
+    uint256 constant TICKETS_SLOT = 6;
 
     function testMainnetTicketE8eb06MigratesAndSamples() public {
         _checkTicket(finalE8eb06());
@@ -40,7 +41,7 @@ contract ForkBeefyMultiproofTest is MainnetBeefyFixture {
         string memory rpc = vm.envOr("MAINNET_RPC_URL", string("https://eth.drpc.org"));
         vm.createSelectFork(rpc, t.blockNumber - 1);
 
-        (uint128 id, uint128 len, bytes32 root,) =
+        (uint128 id, uint128 len, bytes32 root) =
             t.handover ? BeefyClient(BC).nextValidatorSet() : BeefyClient(BC).currentValidatorSet();
         assertEq(id, t.vsetId, "set id");
         assertEq(len, t.vsetLength, "set length");
@@ -106,7 +107,7 @@ contract ForkBeefyMultiproofTest is MainnetBeefyFixture {
     /// into the new layout.
     function _migrateTicket(bytes32 commitmentHash) internal {
         bytes32 ticketID = keccak256(abi.encode(RELAYER, commitmentHash));
-        uint256 oldBase = uint256(keccak256(abi.encode(ticketID, TICKETS_SLOT)));
+        uint256 oldBase = uint256(keccak256(abi.encode(ticketID, LIVE_TICKETS_SLOT)));
         uint256 newBase = uint256(keccak256(abi.encode(RELAYER, TICKETS_SLOT)));
 
         bytes32 packed = vm.load(BC, bytes32(oldBase));
@@ -164,5 +165,9 @@ contract ForkBeefyMultiproofTest is MainnetBeefyFixture {
             d1
         );
         vm.etch(BC, address(patched).code);
+        // The local ValidatorSetState is two slots (usage counters moved out), so the next set
+        // moves from slots 6-7 to 4-5. The current set stays at 2-3.
+        vm.store(BC, bytes32(uint256(4)), vm.load(BC, bytes32(uint256(6))));
+        vm.store(BC, bytes32(uint256(5)), vm.load(BC, bytes32(uint256(7))));
     }
 }

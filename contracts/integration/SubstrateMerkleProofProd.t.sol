@@ -83,8 +83,9 @@ contract SubstrateMerkleProofProdTest is Test {
     string constant RPC = "https://eth-mainnet.public.blastapi.io"; // archive
     address constant BC = 0x7cfc5C8b341991993080Af67D940B6aD19a010E1;
     address constant RELAYER = 0xBa9bC9a8Aa87872f7B990031bde984A00b9CEd49;
-    /// Storage slot of `BeefyClient.tickets`. The mapping slot is unchanged; the key and value are not.
-    uint256 constant TICKETS_SLOT = 10;
+    /// Storage slot of `BeefyClient.tickets` on mainnet and in the local layout.
+    uint256 constant LIVE_TICKETS_SLOT = 10;
+    uint256 constant TICKETS_SLOT = 6;
 
     NewVerifyHarness newH;
 
@@ -204,7 +205,7 @@ contract SubstrateMerkleProofProdTest is Test {
     /// fields. This branch keys it by relayer and packs it into two slots.
     function _migrateTicket(bytes32 commitmentHash) internal {
         bytes32 ticketID = keccak256(abi.encode(RELAYER, commitmentHash));
-        uint256 oldBase = uint256(keccak256(abi.encode(ticketID, TICKETS_SLOT)));
+        uint256 oldBase = uint256(keccak256(abi.encode(ticketID, LIVE_TICKETS_SLOT)));
         uint256 newBase = uint256(keccak256(abi.encode(RELAYER, TICKETS_SLOT)));
 
         bytes32 packed = vm.load(BC, bytes32(oldBase));
@@ -243,6 +244,10 @@ contract SubstrateMerkleProofProdTest is Test {
         BeefyClient patched = new BeefyClient(delay, expiry, minSigs, fsSigs, 0, d0, d1);
 
         vm.etch(BC, address(patched).code);
+        // The local ValidatorSetState is two slots (usage counters moved out), so the next set
+        // moves from slots 6-7 to 4-5. The current set stays at 2-3.
+        vm.store(BC, bytes32(uint256(4)), vm.load(BC, bytes32(uint256(6))));
+        vm.store(BC, bytes32(uint256(5)), vm.load(BC, bytes32(uint256(7))));
         // Sanity: the etched patched code reads the live immutables/state unchanged.
         assertEq(BeefyClient(BC).randaoCommitDelay(), delay, "immutables preserved after etch");
     }
@@ -255,8 +260,8 @@ contract SubstrateMerkleProofProdTest is Test {
     // Resolve the genuine validator-set (root, length) that a commitment was verified against, by
     // matching its validatorSetID to the current or next set read from the live contract on the fork.
     function _setForCommitment(uint64 vsetID) internal view returns (bytes32 root, uint256 width) {
-        (uint128 cid, uint128 clen, bytes32 croot,) = BeefyClient(BC).currentValidatorSet();
-        (uint128 nid, uint128 nlen, bytes32 nroot,) = BeefyClient(BC).nextValidatorSet();
+        (uint128 cid, uint128 clen, bytes32 croot) = BeefyClient(BC).currentValidatorSet();
+        (uint128 nid, uint128 nlen, bytes32 nroot) = BeefyClient(BC).nextValidatorSet();
         if (vsetID == cid) return (croot, clen);
         if (vsetID == nid) return (nroot, nlen);
         revert("commitment validatorSetID matches neither current nor next validator set");
