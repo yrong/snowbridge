@@ -9,8 +9,10 @@ import {CompactProofLib} from "./utils/CompactProofLib.sol";
 /// Slots that are always non-zero on mainnet (latestBeefyBlock, latestMMRRoot and the relayer's
 /// ticket) are made non-zero first. Same-set updates send an empty MMR leaf.
 ///
+/// Run one test at a time, or the gas report also counts the inherited BeefyClientTest tests:
 /// FOUNDRY_PROFILE=production FOUNDRY_ISOLATE=true forge test \
-///     --match-contract '^BeefyClientUpdateGasTest$' --hardfork amsterdam --gas-report
+///     --match-contract '^BeefyClientUpdateGasTest$' \
+///     --match-test '^testGasInteractiveSameSet\(\)$' --hardfork amsterdam --gas-report
 contract BeefyClientUpdateGasTest is BeefyClientTest {
     function warm(uint32 id) internal returns (BeefyClient.Commitment memory c) {
         c = initialize(id);
