@@ -116,8 +116,8 @@ contract ForkBeefyMultiproofTest is MainnetBeefyFixture {
         assertTrue(prevRandao != 0, "live ticket has no captured PREVRANDAO");
 
         // Slot 0 keeps blockNumber / validatorSetLen / numRequiredSignatures in its low 128 bits
-        // and takes the 120-bit seed above them. Slot 1 is the claim hash.
-        uint256 seed = uint256(uint120(uint256(prevRandao)));
+        // and takes the 128-bit seed above them. Slot 1 is the claim hash.
+        uint256 seed = uint256(uint128(uint256(prevRandao)));
         if (seed == 0) {
             seed = 1;
         }
@@ -125,7 +125,7 @@ contract ForkBeefyMultiproofTest is MainnetBeefyFixture {
         vm.store(BC, bytes32(newBase), bytes32(uint256(packed) | (seed << 128)));
         vm.store(BC, bytes32(newBase + 1), claim);
 
-        (uint64 blockNumber,,, uint120 stored, bytes32 storedClaim) =
+        (uint64 blockNumber,,, uint128 stored, bytes32 storedClaim) =
             BeefyClient(BC).tickets(RELAYER);
         assertTrue(blockNumber != 0, "ticket block number");
         assertEq(stored, seed, "ticket seed");
@@ -136,7 +136,7 @@ contract ForkBeefyMultiproofTest is MainnetBeefyFixture {
     /// `createFinalBitfield` accepts it and samples `numRequiredSignatures` validators from the
     /// claimed bitfield. The historical `submitFinal` proofs cannot be replayed: they answer the
     /// sample drawn from the full 256-bit PREVRANDAO, while this client samples from its low
-    /// 120 bits. The multiproof itself is replayed on real data in #1813.
+    /// 128 bits. The multiproof itself is replayed on real data in #1813.
     function _checkMigratedTicketSamples(bytes32 commitmentHash, uint256[] memory bf) internal {
         (,, uint32 required,,) = BeefyClient(BC).tickets(RELAYER);
         vm.prank(RELAYER);
