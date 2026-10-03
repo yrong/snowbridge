@@ -210,11 +210,14 @@ contract BeefyClient {
     /// @dev The block number in the relay chain in which the latest MMR root was emitted
     uint64 public latestBeefyBlock;
 
-    /// @dev State of the current validator set
-    ValidatorSetState public currentValidatorSet;
+    /// @dev Which entry of `validatorSets` holds the current set; the other holds the next set.
+    /// It shares a slot with `latestBeefyBlock`, which every update writes.
+    uint8 internal currentSetIndex;
 
-    /// @dev State of the next validator set
-    ValidatorSetState public nextValidatorSet;
+    /// @dev The current and next validator sets, in the slots `currentValidatorSet` and
+    /// `nextValidatorSet` used before. A handover writes the new next set over the outgoing
+    /// current set and flips `currentSetIndex`, instead of copying the next set over the current.
+    ValidatorSetState[2] internal validatorSets;
 
     /// @dev The ticket of each relayer. At most one is active per relayer.
     mapping(address relayer => Ticket) public tickets;
@@ -306,15 +309,31 @@ contract BeefyClient {
         minNumRequiredSignatures = _minNumRequiredSignatures;
         fiatShamirRequiredSignatures = _fiatShamirRequiredSignatures;
         latestBeefyBlock = _initialBeefyBlock;
-        currentValidatorSet.id = _initialValidatorSet.id;
-        currentValidatorSet.length = _initialValidatorSet.length;
-        currentValidatorSet.root = _initialValidatorSet.root;
-        nextValidatorSet.id = _nextValidatorSet.id;
-        nextValidatorSet.length = _nextValidatorSet.length;
-        nextValidatorSet.root = _nextValidatorSet.root;
+        validatorSets[0] = ValidatorSetState(
+            _initialValidatorSet.id, _initialValidatorSet.length, _initialValidatorSet.root
+        );
+        validatorSets[1] = ValidatorSetState(
+            _nextValidatorSet.id, _nextValidatorSet.length, _nextValidatorSet.root
+        );
     }
 
     /* External Functions */
+
+    /// @dev The current validator set.
+    function currentValidatorSet()
+        external
+        view
+        returns (uint128 id, uint128 length, bytes32 root)
+    {
+        ValidatorSetState storage vset = validatorSets[currentSetIndex];
+        return (vset.id, vset.length, vset.root);
+    }
+
+    /// @dev The next validator set.
+    function nextValidatorSet() external view returns (uint128 id, uint128 length, bytes32 root) {
+        ValidatorSetState storage vset = validatorSets[currentSetIndex ^ 1];
+        return (vset.id, vset.length, vset.root);
+    }
 
     /**
      * @dev Begin submission of commitment
@@ -333,22 +352,9 @@ contract BeefyClient {
 
         // `proof.index` is not bounded here. An index at or past `vset.length` fails
         // `isValidatorInSet` below, which reverts the counter update with it.
-        ValidatorSetState storage vset = currentValidatorSet;
-        uint16 signatureUsageCount;
-        if (commitment.validatorSetID == currentValidatorSet.id) {
-            signatureUsageCount = usageCounters[currentValidatorSet.root].get(proof.index);
-            usageCounters[currentValidatorSet.root].set(
-                proof.index, signatureUsageCount.saturatingAdd(1)
-            );
-        } else if (commitment.validatorSetID == nextValidatorSet.id) {
-            signatureUsageCount = usageCounters[nextValidatorSet.root].get(proof.index);
-            usageCounters[nextValidatorSet.root].set(
-                proof.index, signatureUsageCount.saturatingAdd(1)
-            );
-            vset = nextValidatorSet;
-        } else {
-            revert InvalidCommitment();
-        }
+        (ValidatorSetState storage vset,) = validatorSetFor(commitment.validatorSetID);
+        uint16 signatureUsageCount = usageCounters[vset.root].get(proof.index);
+        usageCounters[vset.root].set(proof.index, signatureUsageCount.saturatingAdd(1));
 
         // Check if merkle proof is valid based on the validatorSetRoot and if proof is included in bitfield
         if (
@@ -451,14 +457,8 @@ contract BeefyClient {
         bytes32 commitmentHash = keccak256(encodeCommitment(commitment));
         Ticket storage ticket = validateTicket(commitmentHash, commitment, bitfield);
 
-        bool is_next_session = false;
-        ValidatorSetState storage vset = currentValidatorSet;
-        if (commitment.validatorSetID == nextValidatorSet.id) {
-            is_next_session = true;
-            vset = nextValidatorSet;
-        } else if (commitment.validatorSetID != currentValidatorSet.id) {
-            revert InvalidCommitment();
-        }
+        (ValidatorSetState storage vset, bool is_next_session) =
+            validatorSetFor(commitment.validatorSetID);
 
         // Validate that all padding bits (beyond vset.length) are zero
         // This ensures the bitfield was created by createInitialBitfield or equivalent
@@ -471,7 +471,7 @@ contract BeefyClient {
         if (is_next_session) {
             // The id for candidate nextValidatorSet should be greater than the current
             // nextValidatorSet id
-            if (leaf.nextAuthoritySetID <= nextValidatorSet.id) {
+            if (leaf.nextAuthoritySetID <= vset.id) {
                 revert InvalidMMRLeaf();
             }
             bool leafIsValid = MMRProof.verifyLeafProof(
@@ -480,10 +480,7 @@ contract BeefyClient {
             if (!leafIsValid) {
                 revert InvalidMMRLeafProof();
             }
-            currentValidatorSet = nextValidatorSet;
-            nextValidatorSet.id = leaf.nextAuthoritySetID;
-            nextValidatorSet.length = leaf.nextAuthoritySetLen;
-            nextValidatorSet.root = leaf.nextAuthoritySetRoot;
+            rotateValidatorSets(leaf);
         }
 
         latestMMRRoot = newMMRRoot;
@@ -561,12 +558,7 @@ contract BeefyClient {
         Commitment calldata commitment,
         uint256[] calldata bitfield
     ) external view returns (uint256[] memory) {
-        ValidatorSetState storage vset = currentValidatorSet;
-        if (commitment.validatorSetID == nextValidatorSet.id) {
-            vset = nextValidatorSet;
-        } else if (commitment.validatorSetID != currentValidatorSet.id) {
-            revert InvalidCommitment();
-        }
+        (ValidatorSetState storage vset,) = validatorSetFor(commitment.validatorSetID);
 
         if (
             bitfield.length != Bitfield.containerLength(vset.length)
@@ -602,14 +594,8 @@ contract BeefyClient {
             revert StaleCommitment();
         }
 
-        bool is_next_session = false;
-        ValidatorSetState storage vset = currentValidatorSet;
-        if (commitment.validatorSetID == nextValidatorSet.id) {
-            is_next_session = true;
-            vset = nextValidatorSet;
-        } else if (commitment.validatorSetID != currentValidatorSet.id) {
-            revert InvalidCommitment();
-        }
+        (ValidatorSetState storage vset, bool is_next_session) =
+            validatorSetFor(commitment.validatorSetID);
 
         if (
             bitfield.length != Bitfield.containerLength(vset.length)
@@ -629,7 +615,7 @@ contract BeefyClient {
         if (is_next_session) {
             // The id for candidate nextValidatorSet should be greater than the current
             // nextValidatorSet id
-            if (leaf.nextAuthoritySetID <= nextValidatorSet.id) {
+            if (leaf.nextAuthoritySetID <= vset.id) {
                 revert InvalidMMRLeaf();
             }
             bool leafIsValid = MMRProof.verifyLeafProof(
@@ -638,10 +624,7 @@ contract BeefyClient {
             if (!leafIsValid) {
                 revert InvalidMMRLeafProof();
             }
-            currentValidatorSet = nextValidatorSet;
-            nextValidatorSet.id = leaf.nextAuthoritySetID;
-            nextValidatorSet.length = leaf.nextAuthoritySetLen;
-            nextValidatorSet.root = leaf.nextAuthoritySetRoot;
+            rotateValidatorSets(leaf);
         }
 
         latestMMRRoot = newMMRRoot;
@@ -651,6 +634,38 @@ contract BeefyClient {
     }
 
     /* Internal Functions */
+
+    /**
+     * @dev The validator set that signs commitments with id `validatorSetID`, and whether it is
+     * the next set. Reverts for any other id.
+     */
+    function validatorSetFor(uint64 validatorSetID)
+        internal
+        view
+        returns (ValidatorSetState storage vset, bool isNext)
+    {
+        uint8 index = currentSetIndex;
+        vset = validatorSets[index];
+        if (validatorSetID != vset.id) {
+            vset = validatorSets[index ^ 1];
+            if (validatorSetID != vset.id) {
+                revert InvalidCommitment();
+            }
+            isNext = true;
+        }
+    }
+
+    /**
+     * @dev Handover: the next set becomes current, and `leaf`'s set becomes next. The new next
+     * set is written over the outgoing current set, and the index flips.
+     */
+    function rotateValidatorSets(MMRLeaf calldata leaf) internal {
+        uint8 index = currentSetIndex;
+        validatorSets[index] = ValidatorSetState(
+            leaf.nextAuthoritySetID, leaf.nextAuthoritySetLen, leaf.nextAuthoritySetRoot
+        );
+        currentSetIndex = index ^ 1;
+    }
 
     /**
      * @dev The caller's ticket, which must be open and for this commitment and bitfield.
