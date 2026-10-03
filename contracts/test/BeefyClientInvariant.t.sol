@@ -394,9 +394,9 @@ contract BeefyClientInvariantTest is Test {
     /// forge-config: production.invariant.runs = 32
     /// forge-config: production.invariant.depth = 24
     function invariant_validatorSetsFollowHonestHandovers() public view {
-        (uint128 currentId, uint128 currentLength, bytes32 currentRoot,) =
+        (uint128 currentId, uint128 currentLength, bytes32 currentRoot) =
             client.currentValidatorSet();
-        (uint128 nextId, uint128 nextLength, bytes32 nextRoot,) = client.nextValidatorSet();
+        (uint128 nextId, uint128 nextLength, bytes32 nextRoot) = client.nextValidatorSet();
         assertEq(currentId, handler.ghostCurrentId(), "current set id");
         assertEq(nextId, handler.ghostNextId(), "next set id");
         assertEq(nextId, currentId + 1, "next set is not current + 1");

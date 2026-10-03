@@ -10,10 +10,11 @@ pragma solidity 0.8.34;
 //      each through BOTH the inlined ORIGINAL (pre-aliasing-fix) verify and the current
 //      `SubstrateMerkleProof.verify`, asserting they behave IDENTICALLY (both true).
 //
-//   2. REPLAY (contract layer): etch the current BeefyClient over live storage. `submitInitial`
-//      still takes a single `ValidatorProof` and is replayed as-is. `submitFinal` now takes
-//      `CompactValidatorProofs`; the captured legacy `ValidatorProof[]` is reassembled into that
-//      multiproof format and then submitted.
+//   2. CONTRACT layer: etch the current BeefyClient over live storage. `submitInitial` still
+//      takes a single `ValidatorProof` and is replayed as-is. For `submitFinal`, the live ticket
+//      is copied into the per-relayer two-slot layout and must sample from the claimed bitfield.
+//      The historical proofs are not replayed: they answer a sample drawn from the full 256-bit
+//      PREVRANDAO, while this client samples from its low 128 bits.
 //
 //   BeefyClient 0x7cfc5C8b341991993080Af67D940B6aD19a010E1; all pairs from relayer 0xBa9b...Ed49.
 //
@@ -23,7 +24,7 @@ pragma solidity 0.8.34;
 import {Test} from "forge-std/Test.sol";
 import {SubstrateMerkleProof} from "../src/utils/SubstrateMerkleProof.sol";
 import {BeefyClient} from "../src/BeefyClient.sol";
-import {CompactProofLib} from "../test/utils/CompactProofLib.sol";
+import {Bitfield} from "../src/utils/Bitfield.sol";
 
 /// Inlined copy of the ORIGINAL (pre-fix) verify/computeRoot, to diff against the patched library.
 library OldSubstrateMerkleProof {
@@ -82,6 +83,9 @@ contract SubstrateMerkleProofProdTest is Test {
     string constant RPC = "https://eth-mainnet.public.blastapi.io"; // archive
     address constant BC = 0x7cfc5C8b341991993080Af67D940B6aD19a010E1;
     address constant RELAYER = 0xBa9bC9a8Aa87872f7B990031bde984A00b9CEd49;
+    /// Storage slot of `BeefyClient.tickets` on mainnet and in the local layout.
+    uint256 constant LIVE_TICKETS_SLOT = 10;
+    uint256 constant TICKETS_SLOT = 4;
 
     NewVerifyHarness newH;
 
@@ -197,6 +201,53 @@ contract SubstrateMerkleProofProdTest is Test {
 
     // Replace the live contract's code with a freshly-compiled PATCHED BeefyClient that carries the
     // same immutables (read from the live contract), preserving the live storage layout/state.
+    /// Mainnet stores the relayer's ticket under `keccak(relayer, commitmentHash)` with three
+    /// fields. This branch keys it by relayer and packs it into two slots.
+    function _migrateTicket(bytes32 commitmentHash) internal {
+        bytes32 ticketID = keccak256(abi.encode(RELAYER, commitmentHash));
+        uint256 oldBase = uint256(keccak256(abi.encode(ticketID, LIVE_TICKETS_SLOT)));
+        uint256 newBase = uint256(keccak256(abi.encode(RELAYER, TICKETS_SLOT)));
+
+        bytes32 packed = vm.load(BC, bytes32(oldBase));
+        bytes32 prevRandao = vm.load(BC, bytes32(oldBase + 1));
+        bytes32 bitfieldHash = vm.load(BC, bytes32(oldBase + 2));
+        assertTrue(packed != 0, "no live ticket for the relayer");
+        assertTrue(prevRandao != 0, "live ticket has no captured PREVRANDAO");
+
+        // Slot 0 keeps blockNumber / validatorSetLen / numRequiredSignatures in its low 128 bits
+        // and takes the 128-bit seed above them. Slot 1 is the claim hash.
+        uint256 seed = uint256(uint128(uint256(prevRandao)));
+        if (seed == 0) {
+            seed = 1;
+        }
+        bytes32 claim = keccak256(abi.encode(commitmentHash, bitfieldHash));
+        vm.store(BC, bytes32(newBase), bytes32(uint256(packed) | (seed << 128)));
+        vm.store(BC, bytes32(newBase + 1), claim);
+
+        (uint64 blockNumber,,, uint128 stored, bytes32 storedClaim) =
+            BeefyClient(BC).tickets(RELAYER);
+        assertTrue(blockNumber != 0, "ticket block number");
+        assertEq(stored, seed, "ticket seed");
+        assertEq(storedClaim, claim, "ticket claim");
+    }
+
+    /// Mainnet keeps `latestBeefyBlock` in slot 1 and each validator set in four slots (2-5 and
+    /// 6-9), id and length packed in the first. This branch packs the block, the current-set
+    /// index and both sets' ids and lengths into slot 1 (`Head`), and the roots into slots 2-3.
+    function _remapLiveValidatorSets() internal {
+        uint256 blockNumber = uint256(vm.load(BC, bytes32(uint256(1)))) & type(uint32).max;
+        uint256 current = uint256(vm.load(BC, bytes32(uint256(2))));
+        uint256 next = uint256(vm.load(BC, bytes32(uint256(6))));
+        bytes32 currentRoot = vm.load(BC, bytes32(uint256(3)));
+        bytes32 nextRoot = vm.load(BC, bytes32(uint256(7)));
+        uint256 packed = blockNumber | (uint256(uint64(current)) << 40)
+            | ((current >> 128 & type(uint32).max) << 104) | (uint256(uint64(next)) << 136)
+            | ((next >> 128 & type(uint32).max) << 200);
+        vm.store(BC, bytes32(uint256(1)), bytes32(packed));
+        vm.store(BC, bytes32(uint256(2)), currentRoot);
+        vm.store(BC, bytes32(uint256(3)), nextRoot);
+    }
+
     function _etchPatched() internal {
         BeefyClient live = BeefyClient(BC);
         uint256 delay = live.randaoCommitDelay();
@@ -210,6 +261,7 @@ contract SubstrateMerkleProofProdTest is Test {
         BeefyClient patched = new BeefyClient(delay, expiry, minSigs, fsSigs, 0, d0, d1);
 
         vm.etch(BC, address(patched).code);
+        _remapLiveValidatorSets();
         // Sanity: the etched patched code reads the live immutables/state unchanged.
         assertEq(BeefyClient(BC).randaoCommitDelay(), delay, "immutables preserved after etch");
     }
@@ -222,8 +274,8 @@ contract SubstrateMerkleProofProdTest is Test {
     // Resolve the genuine validator-set (root, length) that a commitment was verified against, by
     // matching its validatorSetID to the current or next set read from the live contract on the fork.
     function _setForCommitment(uint64 vsetID) internal view returns (bytes32 root, uint256 width) {
-        (uint128 cid, uint128 clen, bytes32 croot,) = BeefyClient(BC).currentValidatorSet();
-        (uint128 nid, uint128 nlen, bytes32 nroot,) = BeefyClient(BC).nextValidatorSet();
+        (uint128 cid, uint128 clen, bytes32 croot) = BeefyClient(BC).currentValidatorSet();
+        (uint128 nid, uint128 nlen, bytes32 nroot) = BeefyClient(BC).nextValidatorSet();
         if (vsetID == cid) return (croot, clen);
         if (vsetID == nid) return (nroot, nlen);
         revert("commitment validatorSetID matches neither current nor next validator set");
@@ -268,10 +320,7 @@ contract SubstrateMerkleProofProdTest is Test {
         (
             BeefyClient.Commitment memory c,
             uint256[] memory bf,
-            BeefyClient.ValidatorProof[] memory ps,
-            BeefyClient.MMRLeaf memory leaf,
-            bytes32[] memory leafProof,
-            uint256 order
+            BeefyClient.ValidatorProof[] memory ps,,,
         ) = this.decodeFinal(cd);
         assertGt(ps.length, 0, "expected validator proofs");
 
@@ -281,30 +330,30 @@ contract SubstrateMerkleProofProdTest is Test {
             _assertProofParity(root, width, keccak256(abi.encodePacked(ps[k].account)), ps[k].index, ps[k].proof);
         }
 
-        // 2. Replay on the multiproof ABI: reassemble legacy paths into CompactValidatorProofs.
-        bytes memory multiproofCd = abi.encodeWithSelector(
-            BeefyClient.submitFinal.selector,
-            c,
-            bf,
-            CompactProofLib.toCompact(ps, width),
-            leaf,
-            leafProof,
-            order
-        );
-
+        // 2. The live ticket, copied into the two-slot layout, samples from the claimed bitfield.
         _etchPatched();
+        // The fork holds the ticket under keccak(relayer, commitmentHash). Copy it to tickets[relayer].
+        bytes32 commitmentHash = BeefyClient(BC).computeCommitmentHash(c);
+        _migrateTicket(commitmentHash);
         vm.roll(p.finalBlock);
-        bytes32 rootBefore = BeefyClient(BC).latestMMRRoot();
-        vm.prank(RELAYER);
-        (bool ok, bytes memory ret) = BC.call(multiproofCd);
-        assertTrue(
-            ok, string.concat("submitFinal must succeed on patched code (", p.finalTx, "): ", _revertReason(ret))
-        );
-
-        bytes32 rootAfter = BeefyClient(BC).latestMMRRoot();
-        assertTrue(rootAfter != rootBefore, "submitFinal must update latestMMRRoot");
-        emit log_named_bytes32(string.concat("latestMMRRoot after ", p.finalTx), rootAfter);
+        _checkMigratedTicketSamples(commitmentHash, bf);
     }
+
+    /// The migrated ticket is open, captured and bound to this commitment and bitfield:
+    /// `createFinalBitfield` accepts it and samples `numRequiredSignatures` validators from the
+    /// claimed bitfield. The historical `submitFinal` proofs cannot be replayed: they answer the
+    /// sample drawn from the full 256-bit PREVRANDAO, while this client samples from its low
+    /// 128 bits. The multiproof itself is replayed on real data in #1813.
+    function _checkMigratedTicketSamples(bytes32 commitmentHash, uint256[] memory bf) internal {
+        (,, uint32 required,,) = BeefyClient(BC).tickets(RELAYER);
+        vm.prank(RELAYER);
+        uint256[] memory sample = BeefyClient(BC).createFinalBitfield(commitmentHash, bf);
+        assertEq(Bitfield.countSetBits(sample), required, "sample size");
+        for (uint256 w = 0; w < sample.length; w++) {
+            assertEq(sample[w] & ~bf[w], 0, "sample outside the claimed bitfield");
+        }
+    }
+
 
     function test_prod_allInitials() public {
         Pair[] memory pairs = _pairs();
