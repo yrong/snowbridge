@@ -85,7 +85,7 @@ contract SubstrateMerkleProofProdTest is Test {
     address constant RELAYER = 0xBa9bC9a8Aa87872f7B990031bde984A00b9CEd49;
     /// Storage slot of `BeefyClient.tickets` on mainnet and in the local layout.
     uint256 constant LIVE_TICKETS_SLOT = 10;
-    uint256 constant TICKETS_SLOT = 6;
+    uint256 constant TICKETS_SLOT = 4;
 
     NewVerifyHarness newH;
 
@@ -231,6 +231,23 @@ contract SubstrateMerkleProofProdTest is Test {
         assertEq(storedClaim, claim, "ticket claim");
     }
 
+    /// Mainnet keeps `latestBeefyBlock` in slot 1 and each validator set in four slots (2-5 and
+    /// 6-9), id and length packed in the first. This branch packs the block, the current-set
+    /// index and both sets' ids and lengths into slot 1 (`Head`), and the roots into slots 2-3.
+    function _remapLiveValidatorSets() internal {
+        uint256 blockNumber = uint256(vm.load(BC, bytes32(uint256(1)))) & type(uint32).max;
+        uint256 current = uint256(vm.load(BC, bytes32(uint256(2))));
+        uint256 next = uint256(vm.load(BC, bytes32(uint256(6))));
+        bytes32 currentRoot = vm.load(BC, bytes32(uint256(3)));
+        bytes32 nextRoot = vm.load(BC, bytes32(uint256(7)));
+        uint256 packed = blockNumber | (uint256(uint64(current)) << 40)
+            | ((current >> 128 & type(uint32).max) << 104) | (uint256(uint64(next)) << 136)
+            | ((next >> 128 & type(uint32).max) << 200);
+        vm.store(BC, bytes32(uint256(1)), bytes32(packed));
+        vm.store(BC, bytes32(uint256(2)), currentRoot);
+        vm.store(BC, bytes32(uint256(3)), nextRoot);
+    }
+
     function _etchPatched() internal {
         BeefyClient live = BeefyClient(BC);
         uint256 delay = live.randaoCommitDelay();
@@ -244,10 +261,7 @@ contract SubstrateMerkleProofProdTest is Test {
         BeefyClient patched = new BeefyClient(delay, expiry, minSigs, fsSigs, 0, d0, d1);
 
         vm.etch(BC, address(patched).code);
-        // The local ValidatorSetState is two slots (usage counters moved out), so the next set
-        // moves from slots 6-7 to 4-5. The current set stays at 2-3.
-        vm.store(BC, bytes32(uint256(4)), vm.load(BC, bytes32(uint256(6))));
-        vm.store(BC, bytes32(uint256(5)), vm.load(BC, bytes32(uint256(7))));
+        _remapLiveValidatorSets();
         // Sanity: the etched patched code reads the live immutables/state unchanged.
         assertEq(BeefyClient(BC).randaoCommitDelay(), delay, "immutables preserved after etch");
     }
