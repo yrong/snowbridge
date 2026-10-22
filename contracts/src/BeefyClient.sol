@@ -645,7 +645,7 @@ contract BeefyClient {
     /**
      * @dev Calculates the number of required signatures for `submitFinal`.
      * @param validatorSetLen The length of the validator set
-     * @param signatureUsageCount A counter of the number of times the validator signature was previously used in a call to `submitInitial` within the session.
+     * @param signatureUsageCount The number of times the validator signature was previously used in a call to `submitInitial` within the session.
      * @param minRequiredSignatures The minimum amount of signatures to verify
      */
     // For more details on the calculation, read the following:
@@ -660,8 +660,8 @@ contract BeefyClient {
         uint256 numRequiredSignatures = minRequiredSignatures;
         // Add signatures based on the number of validators in the validator set.
         numRequiredSignatures += Math.log2(validatorSetLen, Math.Rounding.Ceil);
-        // Add signatures based on the signature usage count.
-        numRequiredSignatures += 1 + (2 * Math.log2(signatureUsageCount, Math.Rounding.Ceil));
+        // Add signatures based on the signature usage count. The spec counts the current claim, so add one.
+        numRequiredSignatures += 1 + (2 * Math.log2(signatureUsageCount + 1, Math.Rounding.Ceil));
         // Never require more signatures than 1/3 + 1, which is sufficient to ensure at least one honest validator.
         return Math.min(numRequiredSignatures, computeMaxRequiredSignatures(validatorSetLen));
     }
