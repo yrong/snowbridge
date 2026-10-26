@@ -266,7 +266,7 @@ contract BeefyClientTest is Test {
 
         // make an invalid signature
         finalValidatorProofs[0].r =
-            0xb5bb9d8014a0f9b1d61e21e796d78dccdf1352f23cd32812f4850b878ae4944c;
+        0xb5bb9d8014a0f9b1d61e21e796d78dccdf1352f23cd32812f4850b878ae4944c;
         vm.expectRevert(BeefyClient.InvalidSignature.selector);
         beefyClient.submitFinal(
             commitment,
