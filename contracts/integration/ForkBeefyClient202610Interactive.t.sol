@@ -119,4 +119,28 @@ contract ForkBeefyClient202610InteractiveTest is ForkBeefyClient202610Base {
         emit log_named_uint("submitFinal gas (31 proofs)", gasBefore - gasleft());
         assertEq(client.latestBeefyBlock(), r.commitment.blockNumber);
     }
+
+    /// Reusing the initial validator signature in a second ticket raises the requirement.
+    function testSecondUseNeeds33Signatures() public {
+        Replay memory r = load();
+
+        vm.prank(makeAddr("first-relayer"));
+        client.submitInitial(r.commitment, r.bitfield, r.initialProof);
+        vm.prank(RELAYER);
+        client.submitInitial(r.commitment, r.bitfield, r.initialProof);
+        (,, uint32 required,,) = client.tickets(ticketID(RELAYER, r.commitmentHash));
+        assertEq(required, 33);
+
+        vm.roll(block.number + randaoDelay);
+        vm.prevrandao(bytes32(prevRandao));
+        vm.prank(RELAYER);
+        client.commitPrevRandao(r.commitmentHash);
+
+        vm.prank(RELAYER);
+        uint256[] memory finalBitfield = client.createFinalBitfield(r.commitmentHash, r.bitfield);
+        BeefyClient.ValidatorProof[] memory proofs = completeProofs(r, finalBitfield);
+        assertEq(proofs.length, 33);
+        submitFinal(r, proofs);
+        assertEq(client.latestBeefyBlock(), r.commitment.blockNumber);
+    }
 }
