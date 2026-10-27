@@ -802,6 +802,13 @@ contract BeefyClientTest is Test {
         assertEq(1, result, "C");
     }
 
+    function testNumRequiredSignaturesBySignatureUsage() public view {
+        assertEq(beefyClient.computeNumRequiredSignatures_public(600, 0, 20), 31);
+        assertEq(beefyClient.computeNumRequiredSignatures_public(600, 1, 20), 33);
+        assertEq(beefyClient.computeNumRequiredSignatures_public(600, 2, 20), 35);
+        assertEq(beefyClient.computeNumRequiredSignatures_public(600, 3, 20), 35);
+    }
+
     function testStorageToStorageCopies() public {
         beefyClient.copyCounters();
     }
